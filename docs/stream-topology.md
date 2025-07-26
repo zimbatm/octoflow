@@ -1,169 +1,226 @@
-# GitHub Events Stream Topology
+# Octoflow Stream Topology
 
 ## Overview
 
-The system uses a two-stage event processing architecture:
-1. **Primary Stream**: Webhook events published by organization ID
-2. **Entity Routing**: Event dispatcher republishes to entity-specific subjects
+Octoflow uses a two-stage event processing architecture designed for simplicity and flexibility:
 
-## Architecture
+1. **Primary Stream**: Webhook events published by organization ID using numeric IDs
+2. **Entity Routing**: Event dispatcher extracts entities and republishes to specific subjects
+
+## Event Flow
 
 ```
 GitHub Webhook
       |
       v
-Webhook Receiver
+Webhook Receiver (validates signature, quick response)
       |
       v
-Primary Stream: github.events.org.{org_id}.{event_type}
-                github.events.global.{event_type}
+Primary Stream (NATS JetStream with deduplication)
+  ├── github.events.org.{org_id}.{event_type}
+  └── github.events.global.{event_type}
       |
       v
-Event Dispatcher
+Event Dispatcher (extracts entities, parallel routing)
       |
-      +---> github.events.repo.{repo_id}.{event_type}
-      +---> github.events.user.{user_id}.{event_type}
-      +---> github.events.user.{user_id}.activity
-      +---> github.events.pr.{repo_id}.{pr_number}.{event_type}
-      +---> github.events.pr.{repo_id}.{pr_number}
-      +---> github.events.issue.{repo_id}.{issue_number}.{event_type}
-      +---> github.events.issue.{repo_id}.{issue_number}
+      ├── github.events.repo.{repo_id}.{event_type}
+      ├── github.events.user.{user_id}.{event_type}  
+      ├── github.events.pr.{repo_id}.{pr_number}.{event_type}
+      ├── github.events.pr.{repo_id}.{pr_number}
+      ├── github.events.issue.{repo_id}.{issue_number}.{event_type}
+      └── github.events.issue.{repo_id}.{issue_number}
 ```
 
-## Stream Configuration
+## NATS JetStream Configuration
 
-### GITHUB_EVENTS_RAW Stream
-- **Purpose**: Store all GitHub webhook events with deduplication
-- **Subjects**: `github.events.>` (flexible depth for all patterns)
-- **Deduplication**: 24-hour window based on GitHub delivery ID
-- **Retention**: Configured via NATS_STREAM_MAX_AGE (default 24h)
-- **Max Consumers**: Unlimited
+### Primary Stream: GITHUB_EVENTS_RAW
 
-## Subject Patterns
+| Setting | Value | Purpose |
+|---------|-------|----------|
+| Subjects | `github.events.>` | Flexible depth for all routing patterns |
+| Deduplication | 24-hour window | Prevents duplicate events using GitHub delivery ID |
+| Retention | Configurable (default 24h) | How long to keep events in stream |
+| Storage | File-based | Persistent storage for reliability |
+| Replicas | Configurable | High availability in production |
+| Max Consumers | Unlimited | Multiple applications can consume |
 
-### Primary Subjects (from Webhook)
+## Subject Naming Patterns
 
-Events are initially published to organization-based subjects using numeric IDs:
+### Stage 1: Primary Subjects (Webhook Receiver)
 
-```
-github.events.org.{organization_id}.{event_type}
-github.events.global.{event_type}
-```
+Events are published to organization-based subjects using **numeric IDs**:
 
-Examples:
-- `github.events.org.12345678.push`
-- `github.events.org.12345678.pull_request`
-- `github.events.global.sponsorship`
+| Pattern | Example | When Used |
+|---------|---------|-----------|  
+| `github.events.org.{org_id}.{event_type}` | `github.events.org.12345678.push` | Organization-owned events |
+| `github.events.global.{event_type}` | `github.events.global.sponsorship` | User-level events without org |
 
-### Entity-Specific Subjects (from Dispatcher)
+### Stage 2: Entity-Specific Subjects (Event Dispatcher)
 
-The event dispatcher extracts entities and republishes to:
+The dispatcher extracts entities and publishes to multiple subjects:
 
 #### Repository Events
-```
-github.events.repo.{repository_id}.{event_type}
-```
-- Example: `github.events.repo.87654321.push`
+| Pattern | Example | Description |
+|---------|---------|-------------|
+| `github.events.repo.{repo_id}.{event_type}` | `github.events.repo.87654321.push` | Specific event type for repo |
+| `github.events.repo.{repo_id}.>` | `github.events.repo.87654321.>` | All events for repository |
 
-#### User Events
-```
-github.events.user.{user_id}.{event_type}
-github.events.user.{user_id}.activity
-```
-- Example: `github.events.user.11111111.pull_request`
-- Example: `github.events.user.11111111.activity` (all events)
+#### User Events  
+| Pattern | Example | Description |
+|---------|---------|-------------|
+| `github.events.user.{user_id}.{event_type}` | `github.events.user.11111111.pull_request` | Specific event type for user |
+| `github.events.user.{user_id}.*` | `github.events.user.11111111.*` | All events involving user |
 
 #### Pull Request Events
-```
-github.events.pr.{repository_id}.{pr_number}.{event_type}
-github.events.pr.{repository_id}.{pr_number}
-```
-- Example: `github.events.pr.87654321.456.pull_request_review`
-- Example: `github.events.pr.87654321.456` (all PR events)
+| Pattern | Example | Description |
+|---------|---------|-------------|
+| `github.events.pr.{repo_id}.{pr_number}.{event_type}` | `github.events.pr.87654321.456.pull_request_review` | Specific PR event |
+| `github.events.pr.{repo_id}.{pr_number}` | `github.events.pr.87654321.456` | All events for PR |
+| `github.events.pr.{repo_id}.>` | `github.events.pr.87654321.>` | All PRs in repository |
 
 #### Issue Events
-```
-github.events.issue.{repository_id}.{issue_number}.{event_type}
-github.events.issue.{repository_id}.{issue_number}
-```
-- Example: `github.events.issue.87654321.123.issue_comment`
-- Example: `github.events.issue.87654321.123` (all issue events)
+| Pattern | Example | Description |
+|---------|---------|-------------|
+| `github.events.issue.{repo_id}.{issue_number}.{event_type}` | `github.events.issue.87654321.123.issue_comment` | Specific issue event |
+| `github.events.issue.{repo_id}.{issue_number}` | `github.events.issue.87654321.123` | All events for issue |
+| `github.events.issue.{repo_id}.>` | `github.events.issue.87654321.>` | All issues in repository |
 
-## Consumer Patterns
+## Subscription Patterns
 
-### Organization-wide Monitoring
+### By Scope
+
+**Organization-wide**
 ```bash
-# All events for organization 12345678
+# Everything in org 12345678
 nats sub "github.events.org.12345678.>"
+
+# Only pushes in org
+nats sub "github.events.org.12345678.push"
 ```
 
-### Repository-specific Monitoring
-```bash
-# All events for repository 87654321
+**Repository-specific**
+```bash  
+# Everything in repo 87654321
 nats sub "github.events.repo.87654321.>"
 
-# Only push events for repository
-nats sub "github.events.repo.87654321.push"
+# Only releases
+nats sub "github.events.repo.87654321.release"
 ```
 
-### User Activity Tracking
+**User activity**
 ```bash
-# All activity for user 11111111
-nats sub "github.events.user.11111111.activity"
+# All activity by user 11111111
+nats sub "github.events.user.11111111.*"
 
-# Only PR events for user
+# Only their PRs
 nats sub "github.events.user.11111111.pull_request"
 ```
 
-### PR/Issue Tracking
+**PR/Issue tracking**
 ```bash
-# All events for PR #456
+# Watch PR #456
 nats sub "github.events.pr.87654321.456"
 
-# All events for issue #123
-nats sub "github.events.issue.87654321.123"
-
-# All PRs in repository
+# All PRs in repo
 nats sub "github.events.pr.87654321.>"
+
+# Issue #123 updates
+nats sub "github.events.issue.87654321.123"
 ```
 
-### Event Type Filtering
+### By Event Type
+
 ```bash
-# All push events across all repos
+# All pushes across all repos
 nats sub "github.events.repo.*.push"
 
-# All PR reviews across all repos
+# All PR reviews
 nats sub "github.events.repo.*.pull_request_review"
+
+# All security advisories
+nats sub "github.events.repo.*.security_advisory"
 ```
 
-## Benefits
+### Advanced Patterns
 
-1. **Rename-Proof**: Using numeric IDs prevents broken subscriptions when entities are renamed
-2. **Flexible Routing**: Subscribe by organization, repository, user, PR, or issue
-3. **Deduplication**: NATS JetStream prevents duplicate events
-4. **Multi-Dimensional**: Same event accessible through multiple subscription patterns
-5. **Performance**: Initial routing is simple; complex routing handled asynchronously
+```bash
+# Multiple event types for a repo
+nats sub "github.events.repo.87654321.push" \
+         "github.events.repo.87654321.pull_request" \
+         "github.events.repo.87654321.release"
 
-## Event Flow Example
+# All PR events across multiple repos
+nats sub "github.events.pr.87654321.>" \
+         "github.events.pr.87654322.>" \
+         "github.events.pr.87654323.>"
+```
 
-When GitHub sends a `pull_request` event:
+## Design Benefits
 
-1. **Webhook receives event** with:
-   - Organization ID: 12345678
-   - Repository ID: 87654321  
-   - PR Number: 456
-   - User IDs: [11111111 (author), 22222222 (reviewer)]
+### Rename-Proof Subscriptions
+- Organizations, repos, and users can change names
+- Numeric IDs remain constant
+- No broken subscriptions or lost history
+- Seamless handling of repository transfers
 
-2. **Webhook publishes to**:
-   - `github.events.org.12345678.pull_request`
+### Flexible Routing
+- Subscribe at any granularity level
+- Mix and match subscription patterns
+- Easy to add new routing dimensions
+- No need to modify webhook configuration
 
-3. **Dispatcher receives event and publishes to**:
-   - `github.events.repo.87654321.pull_request`
-   - `github.events.user.11111111.pull_request`
-   - `github.events.user.11111111.activity`
-   - `github.events.user.22222222.pull_request`
-   - `github.events.user.22222222.activity`
-   - `github.events.pr.87654321.456.pull_request`
-   - `github.events.pr.87654321.456`
+### Performance & Reliability  
+- Webhook responds quickly (< 100ms)
+- Complex routing happens asynchronously
+- Built-in deduplication prevents double processing
+- JetStream provides persistence and replay
 
-This allows consumers to subscribe at any level of granularity based on their needs.
+### Operational Simplicity
+- Single stream to backup and monitor
+- Clear separation of concerns
+- Easy to debug event flow
+- Graceful degradation if dispatcher fails
+
+## Example: Pull Request Event Flow
+
+When user 11111111 opens PR #456 in repo 87654321 (org 12345678):
+
+### 1. GitHub sends webhook
+```json
+{
+  "action": "opened",
+  "pull_request": {
+    "id": 456,
+    "user": {"id": 11111111},
+    "base": {"repo": {"id": 87654321}}
+  },
+  "organization": {"id": 12345678}
+}
+```
+
+### 2. Webhook receiver publishes
+```
+github.events.org.12345678.pull_request
+```
+
+### 3. Event dispatcher publishes to
+```
+github.events.repo.87654321.pull_request
+github.events.user.11111111.pull_request  
+github.events.pr.87654321.456.pull_request
+github.events.pr.87654321.456
+```
+
+### 4. Consumers receive based on subscription
+- **Org admin** subscribing to `org.12345678.>` sees it
+- **Repo CI** subscribing to `repo.87654321.pull_request` triggers build
+- **User dashboard** subscribing to `user.11111111.*` shows activity
+- **PR bot** subscribing to `pr.87654321.456` starts processing
+
+## Wildcard Reference
+
+| Wildcard | Meaning | Example |
+|----------|---------|---------|  
+| `*` | Match exactly one token | `repo.*.push` matches `repo.123.push` |
+| `>` | Match one or more tokens | `org.123.>` matches all org events |
+| Multiple subjects | Subscribe to multiple patterns | See advanced patterns above |

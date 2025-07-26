@@ -241,8 +241,6 @@ func buildDispatchSubjects(prefix string, event *events.GitHubEvent, entities *e
 	for _, userID := range entities.UserIDs {
 		// Specific event type
 		subjects = append(subjects, fmt.Sprintf("%s.user.%s.%s", prefix, userID, event.Event))
-		// All activity for user
-		subjects = append(subjects, fmt.Sprintf("%s.user.%s.activity", prefix, userID))
 	}
 
 	// PR events

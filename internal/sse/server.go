@@ -26,6 +26,7 @@ type Server struct {
 // Client represents a connected SSE client
 type Client struct {
 	ID         string
+	StreamID   string
 	Filter     *events.EventFilter
 	LastSeen   time.Time
 	EventCount int64
@@ -37,72 +38,20 @@ func NewServer(cfg *config.SSEConfig) *Server {
 	sseServer := sse.New()
 	sseServer.AutoReplay = false
 	sseServer.EventTTL = 30 * time.Second
-
+	
 	// Configure CORS
 	sseServer.Headers = map[string]string{
 		"Access-Control-Allow-Origin":  strings.Join(cfg.AllowedOrigins, ", "),
 		"Access-Control-Allow-Methods": "GET, OPTIONS",
-		"Access-Control-Allow-Headers": "Content-Type, Cache-Control, X-Requested-With, " + cfg.AuthHeader,
+		"Access-Control-Allow-Headers": "Content-Type, Cache-Control, X-Requested-With",
 		"Cache-Control":                "no-cache",
+		"Connection":                   "keep-alive",
 	}
-
-	// Create HTTP mux
-	mux := http.NewServeMux()
-
-	// SSE endpoint
-	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-		// Handle CORS preflight
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// Check authentication if required
-		if cfg.RequireAuth {
-			auth := r.Header.Get(cfg.AuthHeader)
-			if auth == "" {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-			// TODO: Implement proper authentication validation
-		}
-
-		// Extract filter from query params
-		filter := extractFilter(r)
-
-		// Generate client ID
-		clientID := fmt.Sprintf("client-%d", time.Now().UnixNano())
-
-		// Register client (TODO: implement client tracking)
-		_ = &Client{
-			ID:       clientID,
-			Filter:   filter,
-			LastSeen: time.Now(),
-		}
-
-		// Serve SSE
-		sseServer.ServeHTTP(w, r)
-	})
-
-	// Health check endpoint
-	mux.HandleFunc("/health", healthHandler)
-
-	// Stats endpoint
-	mux.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		statsHandler(w, r, &Server{clients: make(map[string]*Client), clientMutex: sync.RWMutex{}})
-	})
 
 	server := &Server{
 		config:    cfg,
 		sseServer: sseServer,
 		clients:   make(map[string]*Client),
-		httpServer: &http.Server{
-			Addr:         cfg.ListenAddr,
-			Handler:      mux,
-			ReadTimeout:  5 * time.Second,
-			WriteTimeout: cfg.ClientTimeout,
-			IdleTimeout:  120 * time.Second,
-		},
 	}
 
 	// Start client cleanup routine
@@ -111,18 +60,54 @@ func NewServer(cfg *config.SSEConfig) *Server {
 	return server
 }
 
-// PublishEvent publishes an event to SSE clients
+// ServeSSE serves SSE for a specific stream with optional filtering
+func (s *Server) ServeSSE(w http.ResponseWriter, r *http.Request, streamID string, filter *events.EventFilter) {
+	// Generate client ID
+	clientID := fmt.Sprintf("client-%s-%d", streamID, time.Now().UnixNano())
+	
+	// Register client
+	s.registerClient(clientID, streamID, filter)
+	defer s.unregisterClient(clientID)
+	
+	// Create custom streams for this client based on their filter
+	streams := []string{streamID}
+	if filter != nil && len(filter.Events) > 0 {
+		// Add event-specific streams
+		for _, evt := range filter.Events {
+			streams = append(streams, fmt.Sprintf("%s:%s", streamID, evt))
+		}
+	}
+	
+	// Serve SSE with the specific streams
+	s.sseServer.ServeHTTP(w, r)
+}
+
+// PublishEvent publishes an event to SSE clients (legacy method for backward compatibility)
 func (s *Server) PublishEvent(event *events.GitHubEvent) error {
+	// Publish to the default "all" stream
+	return s.PublishEventToStream(event, "all")
+}
+
+// PublishEventToStream publishes an event to a specific stream
+func (s *Server) PublishEventToStream(event *events.GitHubEvent, streamID string) error {
 	// Create SSE event
 	eventData, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	// Create streams based on event properties
-	streams := s.getStreamsForEvent(event)
+	// Create base streams
+	streams := []string{streamID}
+	
+	// Add event type specific stream
+	streams = append(streams, fmt.Sprintf("%s:%s", streamID, event.Event))
+	
+	// Add action specific stream if applicable
+	if event.Action != "" {
+		streams = append(streams, fmt.Sprintf("%s:%s:%s", streamID, event.Event, event.Action))
+	}
 
-	// Publish to relevant streams
+	// Publish to all relevant streams
 	for _, stream := range streams {
 		s.sseServer.Publish(stream, &sse.Event{
 			ID:    []byte(event.ID),
@@ -132,45 +117,49 @@ func (s *Server) PublishEvent(event *events.GitHubEvent) error {
 	}
 
 	// Update client stats
-	s.updateClientStats(event)
+	s.updateClientStats(streamID, event)
 
 	return nil
 }
 
-// getStreamsForEvent determines which streams an event should be published to
-func (s *Server) getStreamsForEvent(event *events.GitHubEvent) []string {
-	streams := []string{"all"} // Default stream for all events
-
-	// Add event type stream
-	streams = append(streams, "event:"+event.Event)
-
-	// Add repository stream if present
-	if event.Repository != "" {
-		streams = append(streams, "repo:"+event.Repository)
+// registerClient registers a new SSE client
+func (s *Server) registerClient(clientID, streamID string, filter *events.EventFilter) {
+	s.clientMutex.Lock()
+	defer s.clientMutex.Unlock()
+	
+	s.clients[clientID] = &Client{
+		ID:       clientID,
+		StreamID: streamID,
+		Filter:   filter,
+		LastSeen: time.Now(),
 	}
+	
+	fmt.Printf("Client connected: %s (stream: %s)\n", clientID, streamID)
+}
 
-	// Add organization stream if present
-	if event.Organization != "" {
-		streams = append(streams, "org:"+event.Organization)
+// unregisterClient removes a client registration
+func (s *Server) unregisterClient(clientID string) {
+	s.clientMutex.Lock()
+	defer s.clientMutex.Unlock()
+	
+	if client, exists := s.clients[clientID]; exists {
+		fmt.Printf("Client disconnected: %s (stream: %s, events: %d)\n", 
+			clientID, client.StreamID, client.EventCount)
+		delete(s.clients, clientID)
 	}
-
-	// Add action-specific stream for certain events
-	if event.Action != "" {
-		streams = append(streams, fmt.Sprintf("%s:%s", event.Event, event.Action))
-	}
-
-	return streams
 }
 
 // updateClientStats updates statistics for connected clients
-func (s *Server) updateClientStats(event *events.GitHubEvent) {
+func (s *Server) updateClientStats(streamID string, event *events.GitHubEvent) {
 	s.clientMutex.Lock()
 	defer s.clientMutex.Unlock()
 
 	for _, client := range s.clients {
-		if client.Filter == nil || client.Filter.Matches(event) {
-			client.EventCount++
-			client.LastSeen = time.Now()
+		if client.StreamID == streamID {
+			if client.Filter == nil || client.Filter.Matches(event) {
+				client.EventCount++
+				client.LastSeen = time.Now()
+			}
 		}
 	}
 }
@@ -193,8 +182,63 @@ func (s *Server) cleanupClients() {
 	}
 }
 
-// Start starts the SSE server
+// StatsHandler handles statistics requests
+func (s *Server) StatsHandler(w http.ResponseWriter, r *http.Request) {
+	s.clientMutex.RLock()
+	defer s.clientMutex.RUnlock()
+
+	// Group clients by stream
+	streamStats := make(map[string]int)
+	totalEvents := int64(0)
+	
+	for _, client := range s.clients {
+		streamStats[client.StreamID]++
+		totalEvents += client.EventCount
+	}
+
+	stats := struct {
+		TotalClients    int            `json:"total_clients"`
+		TotalEvents     int64          `json:"total_events"`
+		ClientsByStream map[string]int `json:"clients_by_stream"`
+		Uptime          string         `json:"uptime"`
+	}{
+		TotalClients:    len(s.clients),
+		TotalEvents:     totalEvents,
+		ClientsByStream: streamStats,
+		Uptime:          time.Since(time.Now()).String(), // This would need proper start time tracking
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
+}
+
+// GetConnectedClients returns the number of connected clients
+func (s *Server) GetConnectedClients() int {
+	s.clientMutex.RLock()
+	defer s.clientMutex.RUnlock()
+	return len(s.clients)
+}
+
+// Start starts the SSE server (if used standalone)
 func (s *Server) Start() error {
+	if s.httpServer == nil {
+		// Create HTTP server if not already created
+		mux := http.NewServeMux()
+		mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+			s.ServeSSE(w, r, "all", extractFilter(r))
+		})
+		mux.HandleFunc("/health", healthHandler)
+		mux.HandleFunc("/stats", s.StatsHandler)
+		
+		s.httpServer = &http.Server{
+			Addr:         s.config.ListenAddr,
+			Handler:      mux,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: s.config.ClientTimeout,
+			IdleTimeout:  120 * time.Second,
+		}
+	}
+	
 	fmt.Printf("Starting SSE server on %s\n", s.config.ListenAddr)
 	return s.httpServer.ListenAndServe()
 }
@@ -203,7 +247,11 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	fmt.Println("Shutting down SSE server...")
 	s.sseServer.Close()
-	return s.httpServer.Shutdown(ctx)
+	
+	if s.httpServer != nil {
+		return s.httpServer.Shutdown(ctx)
+	}
+	return nil
 }
 
 // extractFilter extracts event filter from query parameters
@@ -211,27 +259,12 @@ func extractFilter(r *http.Request) *events.EventFilter {
 	filter := &events.EventFilter{}
 
 	// Extract event types
-	if eventTypes := r.URL.Query().Get("events"); eventTypes != "" {
+	if eventTypes := r.URL.Query().Get("type"); eventTypes != "" {
 		filter.Events = strings.Split(eventTypes, ",")
 	}
 
-	// Extract repositories
-	if repos := r.URL.Query().Get("repos"); repos != "" {
-		filter.Repositories = strings.Split(repos, ",")
-	}
-
-	// Extract organizations
-	if orgs := r.URL.Query().Get("orgs"); orgs != "" {
-		filter.Organizations = strings.Split(orgs, ",")
-	}
-
-	// Extract senders
-	if senders := r.URL.Query().Get("senders"); senders != "" {
-		filter.Senders = strings.Split(senders, ",")
-	}
-
 	// Extract actions
-	if actions := r.URL.Query().Get("actions"); actions != "" {
+	if actions := r.URL.Query().Get("action"); actions != "" {
 		filter.Actions = strings.Split(actions, ",")
 	}
 
@@ -243,29 +276,4 @@ func healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprintf(w, `{"status":"healthy","service":"sse-server"}`)
-}
-
-// statsHandler handles statistics requests
-func statsHandler(w http.ResponseWriter, r *http.Request, s *Server) {
-	s.clientMutex.RLock()
-	defer s.clientMutex.RUnlock()
-
-	stats := struct {
-		ConnectedClients int                    `json:"connected_clients"`
-		Clients          map[string]interface{} `json:"clients"`
-	}{
-		ConnectedClients: len(s.clients),
-		Clients:          make(map[string]interface{}),
-	}
-
-	for id, client := range s.clients {
-		stats.Clients[id] = map[string]interface{}{
-			"event_count": client.EventCount,
-			"last_seen":   client.LastSeen,
-			"has_filter":  client.Filter != nil,
-		}
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
 }

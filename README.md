@@ -1,17 +1,16 @@
-# GitHub Organization Events System
+# Octoflow - GitHub Event Processing System
 
-A comprehensive event capture and distribution system for GitHub organizations that captures webhook events, publishes them to NATS for real-time consumption, backs them up to S3 as Parquet files, and provides real-time streaming via Server-Sent Events (SSE).
+Octoflow captures GitHub webhook events and distributes them through NATS JetStream using numeric IDs for rename-proof subscriptions. Events flow through a two-stage processing pipeline that enables flexible routing by organization, repository, user, pull request, or issue.
 
-## Features
+## Key Features
 
-- **Webhook Reception**: Secure GitHub webhook endpoint with HMAC-SHA256 signature validation
-- **Event Deduplication**: Single stream with automatic deduplication by GitHub delivery ID
-- **Real-time Distribution**: Publishes events to NATS with JetStream for persistence
-- **S3 Backup**: Stores events as Parquet files with daily partitioning and compression
-- **SSE Streaming**: Real-time event streaming for building reactive applications
-- **Event Filtering**: Configurable filters for different consumers (NATS, S3, SSE)
-- **Auditing**: Complete event capture for compliance and security auditing
-- **Monitoring**: Health checks and metrics endpoints
+- **Two-stage event routing**: Organization-based primary stream → entity-specific dispatch
+- **Rename-proof subscriptions**: Uses GitHub numeric IDs instead of names
+- **Automatic deduplication**: NATS JetStream prevents duplicate events using GitHub delivery ID
+- **Multi-dimensional routing**: Subscribe by org, repo, user, PR, or issue
+- **S3 backup**: Parquet files with daily partitioning for long-term storage
+- **Real-time streaming**: SSE endpoint for web applications
+- **Simple architecture**: Focused on reliability over complex features
 
 ## Architecture
 
@@ -22,336 +21,347 @@ GitHub Webhooks
 Webhook Receiver (Port 8080)
       |
       v
-NATS JetStream (Primary Stream: org.{id}.{event})
+NATS JetStream - Primary Stream
+  └── github.events.org.{org_id}.{event_type}
+  └── github.events.global.{event_type}
       |
       v
-Event Dispatcher (Entity Routing)
+Event Dispatcher (Entity Router)
       |
-      +-----> repo.{id}.{event}
-      +-----> user.{id}.{event}  
-      +-----> pr.{repo_id}.{number}
-      +-----> issue.{repo_id}.{number}
-      |
-      v
-Downstream Consumers:
-      +-----> S3 Worker -----> S3 (Parquet files)
-      +-----> SSE Server (Port 8081) -----> Web Dashboard
-      +-----> Custom Consumers (optional)
+      ├── github.events.repo.{repo_id}.{event_type}
+      ├── github.events.user.{user_id}.{event_type}
+      ├── github.events.pr.{repo_id}.{pr_number}.{event_type}
+      ├── github.events.pr.{repo_id}.{pr_number}
+      ├── github.events.issue.{repo_id}.{issue_number}.{event_type}
+      └── github.events.issue.{repo_id}.{issue_number}
+            |
+            v
+      Consumer Applications
+      ├── S3 Worker → Parquet files
+      ├── SSE Server → Web dashboard
+      └── Your custom consumers
 ```
 
-### Stream Architecture
+### How It Works
 
-The system uses a two-stage event processing architecture:
+1. **Webhook receives event** from GitHub with organization, repository, and user IDs
+2. **Primary publish** to `github.events.org.{org_id}.{event_type}` with deduplication
+3. **Event dispatcher** extracts entities and publishes to specific subjects
+4. **Consumers subscribe** using wildcards to get exactly the events they need
 
-1. **Primary Stream**: Webhook events published by organization ID
-   - Subject pattern: `github.events.org.{org_id}.{event_type}` or `github.events.global.{event_type}`
-   - Uses numeric IDs to handle renames gracefully
-   - NATS JetStream provides automatic deduplication by GitHub delivery ID
+### Why Two Stages?
 
-2. **Entity Routing**: Event dispatcher extracts entities and republishes to:
-   - Repository: `github.events.repo.{repo_id}.{event_type}`
-   - User: `github.events.user.{user_id}.{event_type}` and `.activity`
-   - Pull Request: `github.events.pr.{repo_id}.{pr_number}.{event_type}`
-   - Issue: `github.events.issue.{repo_id}.{issue_number}.{event_type}`
+- **Performance**: Webhook responds quickly without complex routing logic
+- **Reliability**: Primary stream captures everything, dispatcher can retry
+- **Flexibility**: Add new routing dimensions without changing webhook receiver
+- **Simplicity**: Each component has a single responsibility
 
-This allows flexible subscriptions by organization, repository, user, PR, or issue.
+## Quick Start
 
-## Prerequisites
+### Prerequisites
 
 - Go 1.21+
-- NATS Server with JetStream enabled
-- AWS S3 bucket (or S3-compatible storage)
-- GitHub organization with webhook configuration access
+- NATS Server with JetStream
+- S3 bucket (AWS or compatible)
+- GitHub organization webhook access
 
-## Installation
-
-### Using Nix (Recommended)
+### Installation
 
 ```bash
+# Using Nix (recommended)
 nix develop
 make build
-```
 
-### Manual Installation
-
-```bash
+# Or manually
 go mod download
 make build
 ```
 
-## Configuration
-
-The system uses environment variables for configuration. See `configs/config.example.yaml` for all available options.
-
-### Required Environment Variables
+### Configuration
 
 ```bash
-# S3 bucket for event storage (required)
-export S3_BUCKET="your-s3-bucket-name"
+# Required
+export S3_BUCKET="your-bucket-name"
 
-# Optional but recommended for production
-export WEBHOOK_SECRET="your-github-webhook-secret"  # If not set, signature validation is skipped
+# Recommended for production
+export WEBHOOK_SECRET="your-github-secret"
 
-# Optional: Override default ports
+# Optional overrides
 export WEBHOOK_LISTEN_ADDR=":8080"
 export SSE_LISTEN_ADDR=":8081"
 export NATS_URL="nats://localhost:4222"
-
-# Optional: S3/R2 endpoint for S3-compatible services
-export S3_ENDPOINT="https://your-endpoint.com"
 ```
 
 ### GitHub Webhook Setup
 
-1. Go to your GitHub organization settings
-2. Navigate to Webhooks
-3. Add a new webhook with:
+1. Go to your GitHub organization settings → Webhooks
+2. Add webhook:
    - **Payload URL**: `http://your-server:8080/webhook`
    - **Content type**: `application/json`
-   - **Secret**: Your configured webhook secret (optional but recommended)
-   - **Events**: Select "Send me everything" or choose specific events
+   - **Secret**: Your webhook secret
+   - **Events**: "Send me everything"
 
-## Running the System
-
-### Quick Start with Hivemind (Recommended)
+### Running
 
 ```bash
-# Copy and configure environment variables
+# Quick start - runs all services
 cp .env.example .env
 # Edit .env with your values
-
-# Start all services at once
 make run-local
-# or
-hivemind
+
+# Or start services individually:
+nats-server -js                    # NATS with JetStream
+./bin/webhook-receiver             # Receives GitHub webhooks
+./bin/event-dispatcher             # Routes to entity subjects  
+./bin/s3-worker                   # Backs up to S3
+./bin/sse-server                  # Streams to web clients
 ```
 
-This will start:
-- NATS Server (port 4222, monitoring on 8222)
-- Webhook Receiver (port 8080)
-- Event Dispatcher (background)
-- S3 Worker (background)
-- SSE Server (port 8081)
-- Dashboard (port 8082)
+Dashboard available at http://localhost:8082
 
-### Manual Start (Individual Services)
+## Subscription Examples
 
-#### 1. Start NATS Server
+### NATS CLI
 
 ```bash
-nats-server -js
+# All events for organization 12345678
+nats sub "github.events.org.12345678.>"
+
+# All push events across all repos
+nats sub "github.events.repo.*.push"
+
+# Everything happening to user 11111111  
+nats sub "github.events.user.11111111.*"
+
+# Watch PR #456 in repo 87654321
+nats sub "github.events.pr.87654321.456"
+
+# All PRs in a repository
+nats sub "github.events.pr.87654321.>"
 ```
 
-#### 2. Start the Webhook Receiver
-
-```bash
-make run-webhook
-# or
-./bin/webhook-receiver
-```
-
-#### 3. Start the Event Dispatcher
-
-```bash
-make run-dispatcher
-# or
-./bin/event-dispatcher
-```
-
-#### 4. Start the S3 Worker
-
-```bash
-make run-s3-worker
-# or
-./bin/s3-worker
-```
-
-#### 5. Start the SSE Server
-
-```bash
-make run-sse
-# or
-./bin/sse-server
-```
-
-#### 6. Open the Dashboard (Optional)
-
-```bash
-cd web
-go run server.go
-# Open http://localhost:8082 in your browser
-```
-
-## Event Filtering
-
-Configure event filters in your environment or configuration file:
-
-```yaml
-processing:
-  # Filter events for S3 backup
-  s3_filter:
-    events: ["!ping"]  # Exclude ping events
-  
-  # Filter events for SSE streaming
-  sse_filter:
-    events: ["pull_request", "issues"]
-```
-
-## Use Cases
-
-### 1. Auditing and Compliance
-
-Query historical events from S3 using AWS Athena:
-
-```sql
-SELECT event, repository, sender, received_at
-FROM github_events
-WHERE year = 2025 AND month = 1
-  AND event = 'repository'
-  AND action = 'publicized'
-ORDER BY received_at DESC;
-```
-
-### 2. Real-time Pull Request Monitoring
-
-Connect to the SSE endpoint to monitor pull requests:
-
-```javascript
-const eventSource = new EventSource('http://localhost:8081/events?events=pull_request');
-eventSource.onmessage = (event) => {
-  const data = JSON.parse(event.data);
-  console.log(`PR ${data.action} in ${data.repository}`);
-};
-```
-
-### 3. Building Reactive Applications
-
-Subscribe to NATS subjects for specific event types:
+### Go Application
 
 ```go
 nc, _ := nats.Connect("nats://localhost:4222")
 js, _ := nc.JetStream()
 
-// Subscribe by organization (numeric ID)
+// Subscribe to all events for your org
 sub, _ := js.Subscribe("github.events.org.12345678.>", func(msg *nats.Msg) {
-    // Process all events from organization
     var event events.GitHubEvent
     json.Unmarshal(msg.Data, &event)
-    // React to the event...
+    // Process event...
 })
 
-// Subscribe by repository (numeric ID)
-sub, _ := js.Subscribe("github.events.repo.87654321.>", func(msg *nats.Msg) {
-    // Process all events for repository
-    var event events.GitHubEvent
-    json.Unmarshal(msg.Data, &event)
-    // React to the event...
+// Track specific user activity
+sub, _ := js.Subscribe("github.events.user.11111111.*", func(msg *nats.Msg) {
+    // User performed an action
 })
 
-// Subscribe to all events for a specific user
-sub, _ := js.Subscribe("github.events.user.11111111.activity", func(msg *nats.Msg) {
-    // Process all activity for user
-    var event events.GitHubEvent
-    json.Unmarshal(msg.Data, &event)
-    // React to the event...
-})
-
-// Subscribe to all events for a specific PR
+// Monitor a pull request
 sub, _ := js.Subscribe("github.events.pr.87654321.456", func(msg *nats.Msg) {
-    // Process all events for PR #456
+    // PR was updated
+})
+```
+
+### JavaScript (SSE)
+
+```javascript
+const events = new EventSource('http://localhost:8081/events?events=pull_request');
+events.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  console.log(`PR ${data.action}: ${data.pull_request.title}`);
+};
+```
+
+## Common Use Cases
+
+### CI/CD Automation
+
+Trigger builds when specific branches are pushed:
+
+```go
+js.Subscribe("github.events.repo.*.push", func(msg *nats.Msg) {
     var event events.GitHubEvent
     json.Unmarshal(msg.Data, &event)
-    // React to the event...
+    
+    if event.Ref == "refs/heads/main" {
+        triggerBuild(event.Repository.ID)
+    }
 })
+```
+
+### Security Monitoring
+
+Alert on repository visibility changes:
+
+```go
+js.Subscribe("github.events.repo.*.repository", func(msg *nats.Msg) {
+    var event events.GitHubEvent
+    json.Unmarshal(msg.Data, &event)
+    
+    if event.Action == "publicized" {
+        sendAlert("Repository made public", event.Repository)
+    }
+})
+```
+
+### Developer Productivity
+
+Track PR review times:
+
+```go
+js.Subscribe("github.events.pr.*.*.pull_request_review", func(msg *nats.Msg) {
+    var event events.GitHubEvent
+    json.Unmarshal(msg.Data, &event)
+    
+    recordReviewTime(event.PullRequest.ID, event.Review.SubmittedAt)
+})
+```
+
+### Compliance Auditing
+
+Query S3 for historical analysis:
+
+```sql
+-- Find all public repository events
+SELECT event_time, repository_name, actor_login
+FROM github_events 
+WHERE event_type = 'repository' 
+  AND action = 'publicized'
+  AND year = 2025
+ORDER BY event_time DESC;
+```
+
+## Why Numeric IDs?
+
+GitHub entities can be renamed:
+- Organizations change names
+- Repositories get renamed or transferred  
+- Users update their usernames
+
+Using numeric IDs means:
+- ✅ Subscriptions never break due to renames
+- ✅ Historical data remains connected
+- ✅ No need to update downstream systems
+- ✅ Consistent routing across ownership transfers
+
+## Event Filtering
+
+Configure filters in your environment:
+
+```yaml
+processing:
+  s3_filter:
+    events: ["!ping"]  # Exclude ping events from S3
+  
+  sse_filter:
+    events: ["pull_request", "issues"]  # Only these for SSE
 ```
 
 ## Monitoring
 
-### Health Checks
+- Health checks: `/health` on ports 8080 and 8081
+- Metrics: `/metrics` on webhook receiver
+- NATS monitoring: http://localhost:8222
 
-- Webhook Receiver: `http://localhost:8080/health`
-- SSE Server: `http://localhost:8081/health`
+## Production Deployment
 
-### Metrics
+### Security
 
-- Webhook Receiver: `http://localhost:8080/metrics`
-- SSE Server Stats: `http://localhost:8081/stats`
+- Always set `WEBHOOK_SECRET` for signature validation
+- Use TLS for webhook endpoints
+- Enable NATS authentication
+- Configure S3 encryption
+- Add authentication to SSE endpoints
 
-## Development
+### Performance
 
-### Project Structure
-
-```
-octoflow/
-├── cmd/                    # Main applications
-│   ├── webhook-receiver/   # GitHub webhook receiver
-│   ├── event-dispatcher/  # Event entity router
-│   ├── s3-worker/         # S3 backup worker
-│   ├── sse-server/        # SSE streaming server
-│   └── dashboard/         # Web dashboard server
-├── internal/              # Internal packages
-│   ├── config/           # Configuration management
-│   ├── nats/             # NATS connection and schema management
-│   ├── storage/          # S3 writer
-│   ├── sse/              # SSE server
-│   └── webhook/          # Webhook handler
-├── pkg/                   # Public packages
-│   ├── events/           # Event types and utilities
-│   └── filters/          # Event filtering
-└── web/                   # Frontend dashboard assets
-```
-
-### Running Tests
-
-```bash
-make test
-```
-
-### Building for Production
-
-```bash
-make build
-```
-
-## Security Considerations
-
-1. **Webhook Validation**: All incoming webhooks are validated using HMAC-SHA256
-2. **TLS**: Use HTTPS in production for webhook endpoints
-3. **Authentication**: Configure authentication for SSE endpoints in production
-4. **S3 Encryption**: Events are stored with server-side encryption
-5. **Network Security**: Run NATS with authentication in production
-
-## Performance
-
-- Webhook receiver can handle 10,000+ events/second
-- Single stream architecture with built-in deduplication
-- NATS JetStream handles duplicate prevention automatically
-- S3 batching optimizes storage and reduces API calls
-- SSE server supports 1000+ concurrent connections
-- NATS JetStream provides persistence and at-least-once delivery
+- Webhook receiver: 10,000+ events/second
+- NATS deduplication window: 24 hours
+- S3 batching: 1000 events or 5 minutes
+- SSE connections: 1000+ concurrent
+- Event dispatcher: Parallel workers for routing
 
 ## Troubleshooting
 
-### Events Not Appearing
+**Events not appearing?**
+- Check webhook signature validation in logs
+- Verify NATS JetStream is enabled
+- Ensure event dispatcher is running
+- Check your subscription wildcards
 
-1. Check webhook receiver logs for signature validation errors
-2. Verify NATS is running and accessible
-3. Check S3 worker logs for batch processing errors
+**High memory usage?**
+- Reduce S3 batch size
+- Lower NATS consumer prefetch
+- Check for subscription backlogs
 
-### SSE Connection Issues
+## Development
 
-1. Verify SSE server is running on the correct port
-2. Check CORS settings if connecting from a browser
-3. Ensure event filters match expected event types
+```bash
+make test           # Run tests
+make build          # Build all binaries
+make run-local      # Start everything locally
+```
+
+## Documentation
+
+- **[Getting Started Guide](docs/getting-started.md)** - Step-by-step setup instructions
+- **[Quick Reference](docs/quick-reference.md)** - Common patterns and commands
+- **[Stream Topology](docs/stream-topology.md)** - Detailed routing architecture
+- **[NATS CLI Guide](docs/nats-cli-guide.md)** - Using NATS command line tools
+- **[GitHub Event Types](docs/github-event-types.md)** - Event schemas and examples
+
+## Example Applications
+
+See the [examples/](examples/) directory for complete working examples:
+- **[PR Monitor](examples/pr-monitor.go)** - Track pull request lifecycle
+- **[Security Monitor](examples/security-monitor.go)** - Alert on security events
+- **[Examples README](examples/README.md)** - Building your own consumers
+
+## Architecture Deep Dive
+
+### NATS JetStream Configuration
+
+- **Stream**: `GITHUB_EVENTS_RAW`
+- **Subjects**: `github.events.>` (flexible depth)
+- **Deduplication**: 24-hour window on GitHub delivery ID
+- **Retention**: Configurable (default 24 hours)
+- **Delivery**: At-least-once guarantee
+
+### Component Responsibilities
+
+**Webhook Receiver**
+- Validates GitHub signatures
+- Publishes to org-based subjects
+- Returns quickly to GitHub
+- No complex processing
+
+**Event Dispatcher**  
+- Subscribes to primary stream
+- Extracts entity IDs from events
+- Publishes to entity-specific subjects
+- Handles failures gracefully
+
+**S3 Worker**
+- Batches events for efficiency  
+- Writes Parquet files with compression
+- Partitions by date for queries
+- Handles backpressure
+
+**SSE Server**
+- Streams filtered events to browsers
+- Maintains persistent connections
+- Supports reconnection with last-event-id
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests: `make test`
+2. Create a feature branch  
+3. Run tests: `make test`
+4. Ensure `gofmt` compliance
 5. Submit a pull request
 
 ## License
 
-[Add your license here]
+MIT License - see LICENSE file for details

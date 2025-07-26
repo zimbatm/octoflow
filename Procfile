@@ -16,7 +16,5 @@ sse: ./scripts/wait-for.sh 4222 gorefresh ./cmd/sse-server
 # Start the dashboard web server
 dashboard: WEB_DIR=./web gorefresh ./cmd/dashboard
 
-# SSH tunnels for exposing webhook to internet (uncomment one):
-#tunnel-localhost: ./scripts/wait-for.sh 8080 ssh -R 80:localhost:8080 localhost.run
-#tunnel-pinggy: ./scripts/wait-for.sh 8080 ssh -R 80:localhost:8080 a.pinggy.io
-#tunnel-serveo: ./scripts/wait-for.sh 8080 ssh -R 80:localhost:8080 serveo.net
+# SSH tunnels for exposing webhook to internet
+tunnel-cloudflare: cloudflared tunnel run --url http://localhost:8080 6429956a-91d2-40ce-a576-ba3974523d41

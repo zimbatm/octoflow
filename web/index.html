@@ -3,285 +3,671 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GitHub Events Dashboard</title>
+    <title>Octoflow - GitHub Events Dashboard</title>
     <style>
+        * {
+            box-sizing: border-box;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             margin: 0;
             padding: 0;
             background-color: #f5f5f5;
+            color: #24292e;
         }
+        
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            background: white;
+            border-right: 1px solid #e1e4e8;
+            overflow-y: auto;
             padding: 20px;
         }
-        header {
-            background-color: #24292e;
-            color: white;
-            padding: 20px 0;
+        
+        .sidebar h2 {
+            margin: 0 0 20px 0;
+            font-size: 18px;
+        }
+        
+        .subscription-section {
             margin-bottom: 30px;
         }
-        header h1 {
-            margin: 0;
-            text-align: center;
+        
+        .subscription-section h3 {
+            font-size: 14px;
+            text-transform: uppercase;
+            color: #666;
+            margin: 0 0 10px 0;
         }
-        .filters {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
+        
+        .subscription-option {
+            margin-bottom: 10px;
+        }
+        
+        .subscription-option label {
+            display: flex;
+            align-items: center;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 6px;
+            transition: background-color 0.2s;
+        }
+        
+        .subscription-option label:hover {
+            background-color: #f6f8fa;
+        }
+        
+        .subscription-option input[type="radio"] {
+            margin-right: 8px;
+        }
+        
+        .subscription-input {
+            margin-top: 10px;
+        }
+        
+        .subscription-input input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+        
+        .filter-section {
             margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e1e4e8;
         }
-        .filters h3 {
-            margin-top: 0;
-        }
+        
         .filter-group {
             margin-bottom: 15px;
         }
+        
         .filter-group label {
             display: block;
             margin-bottom: 5px;
             font-weight: 500;
+            font-size: 14px;
         }
+        
         .filter-group input, .filter-group select {
             width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
+            padding: 8px 12px;
+            border: 1px solid #e1e4e8;
+            border-radius: 6px;
             font-size: 14px;
         }
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        .stat-card {
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            text-align: center;
-        }
-        .stat-card h3 {
-            margin: 0 0 10px 0;
-            color: #666;
+        
+        .apply-btn {
+            width: 100%;
+            padding: 10px;
+            background-color: #2ea44f;
+            color: white;
+            border: none;
+            border-radius: 6px;
             font-size: 14px;
-            text-transform: uppercase;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
         }
-        .stat-card .value {
-            font-size: 32px;
-            font-weight: bold;
-            color: #24292e;
+        
+        .apply-btn:hover {
+            background-color: #2c974b;
         }
-        .events-container {
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex-direction: column;
             overflow: hidden;
         }
-        .events-header {
-            background-color: #f6f8fa;
-            padding: 15px 20px;
+        
+        /* Header */
+        .header {
+            background: white;
             border-bottom: 1px solid #e1e4e8;
+            padding: 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
-        .events-list {
-            max-height: 600px;
-            overflow-y: auto;
+        
+        .header h1 {
+            margin: 0;
+            font-size: 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        .event-item {
-            padding: 15px 20px;
+        
+        .connection-status {
+            display: inline-flex;
+            align-items: center;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            gap: 6px;
+        }
+        
+        .connection-status::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        
+        .connection-status.connected {
+            background-color: #d1f5d3;
+            color: #1a7f37;
+        }
+        
+        .connection-status.connected::before {
+            background-color: #2ea44f;
+        }
+        
+        .connection-status.disconnected {
+            background-color: #ffebe9;
+            color: #cf222e;
+        }
+        
+        .connection-status.disconnected::before {
+            background-color: #d1242f;
+        }
+        
+        .connection-status.connecting {
+            background-color: #fff8c5;
+            color: #9a6700;
+        }
+        
+        .connection-status.connecting::before {
+            background-color: #ffc107;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        /* Stats Bar */
+        .stats-bar {
+            background: white;
             border-bottom: 1px solid #e1e4e8;
-            transition: background-color 0.3s;
+            padding: 15px 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
         }
+        
+        .stat-item {
+            text-align: center;
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 600;
+            color: #24292e;
+        }
+        
+        /* Events Container */
+        .events-container {
+            flex: 1;
+            overflow-y: auto;
+            background: white;
+            padding: 20px;
+        }
+        
+        .events-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .events-header h2 {
+            margin: 0;
+            font-size: 18px;
+        }
+        
+        .clear-btn {
+            padding: 6px 12px;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .clear-btn:hover {
+            background-color: #c82333;
+        }
+        
+        /* Event Items */
+        .event-item {
+            background: #f6f8fa;
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            transition: all 0.2s;
+            animation: slideIn 0.3s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+        
         .event-item:hover {
-            background-color: #f6f8fa;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transform: translateY(-1px);
         }
-        .event-header {
+        
+        .event-header-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 8px;
         }
+        
+        .event-badges {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        
         .event-type {
             display: inline-block;
             padding: 4px 8px;
             border-radius: 4px;
             font-size: 12px;
             font-weight: 500;
-            text-transform: uppercase;
         }
-        .event-type.pull_request {
-            background-color: #6f42c1;
-            color: white;
+        
+        /* Event type colors */
+        .event-type.pull_request { background: #6f42c1; color: white; }
+        .event-type.pull_request_review { background: #8b5cf6; color: white; }
+        .event-type.issues { background: #d73a49; color: white; }
+        .event-type.issue_comment { background: #e85d75; color: white; }
+        .event-type.push { background: #28a745; color: white; }
+        .event-type.release { background: #0366d6; color: white; }
+        .event-type.create { background: #34d399; color: white; }
+        .event-type.delete { background: #f59e0b; color: white; }
+        .event-type.star { background: #fbbf24; color: white; }
+        .event-type.watch { background: #60a5fa; color: white; }
+        .event-type.fork { background: #a78bfa; color: white; }
+        
+        .event-action {
+            background: #e1e4e8;
+            color: #24292e;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
         }
-        .event-type.issues {
-            background-color: #d73a49;
-            color: white;
-        }
-        .event-type.push {
-            background-color: #28a745;
-            color: white;
-        }
-        .event-type.release {
-            background-color: #0366d6;
-            color: white;
-        }
+        
         .event-time {
             color: #666;
             font-size: 12px;
         }
+        
         .event-details {
-            color: #666;
-            font-size: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
         }
+        
         .event-repo {
             font-weight: 500;
             color: #0366d6;
+            text-decoration: none;
         }
-        .connection-status {
-            display: inline-block;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
+        
+        .event-repo:hover {
+            text-decoration: underline;
         }
-        .connection-status.connected {
-            background-color: #28a745;
-            color: white;
-        }
-        .connection-status.disconnected {
-            background-color: #d73a49;
-            color: white;
-        }
-        .connection-status.connecting {
-            background-color: #ffc107;
-            color: #333;
-        }
-        .pr-status {
-            display: inline-block;
-            margin-left: 10px;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-        }
-        .pr-status.open {
-            background-color: #28a745;
-            color: white;
-        }
-        .pr-status.closed {
-            background-color: #d73a49;
-            color: white;
-        }
-        .pr-status.merged {
-            background-color: #6f42c1;
-            color: white;
-        }
-        #clear-events {
-            background-color: #d73a49;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
+        
+        .event-description {
+            color: #666;
             font-size: 14px;
         }
-        #clear-events:hover {
-            background-color: #c82333;
+        
+        .event-user {
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .event-user a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+        
+        .event-user a:hover {
+            text-decoration: underline;
+        }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .empty-state h3 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            color: #24292e;
+        }
+        
+        /* Loading Spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e1e4e8;
+            border-radius: 50%;
+            border-top-color: #0366d6;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Responsive */
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+            
+            .sidebar {
+                display: none;
+            }
         }
     </style>
 </head>
 <body>
-    <header>
-        <div class="container">
-            <h1>GitHub Organization Events Dashboard</h1>
-        </div>
-    </header>
-    
     <div class="container">
-        <div class="filters">
-            <h3>Filters</h3>
-            <div class="filter-group">
-                <label for="event-filter">Event Types (comma-separated)</label>
-                <input type="text" id="event-filter" placeholder="e.g., pull_request,issues,push" value="pull_request,issues">
-            </div>
-            <div class="filter-group">
-                <label for="repo-filter">Repository Filter</label>
-                <input type="text" id="repo-filter" placeholder="e.g., owner/repo">
-            </div>
-            <div class="filter-group">
-                <label for="org-filter">Organization Filter</label>
-                <input type="text" id="org-filter" placeholder="e.g., my-org">
-            </div>
-            <button onclick="reconnectSSE()">Apply Filters</button>
-        </div>
-        
-        <div class="stats">
-            <div class="stat-card">
-                <h3>Total Events</h3>
-                <div class="value" id="total-events">0</div>
-            </div>
-            <div class="stat-card">
-                <h3>Pull Requests</h3>
-                <div class="value" id="pr-count">0</div>
-            </div>
-            <div class="stat-card">
-                <h3>Issues</h3>
-                <div class="value" id="issues-count">0</div>
-            </div>
-            <div class="stat-card">
-                <h3>Events/Min</h3>
-                <div class="value" id="events-per-minute">0</div>
-            </div>
-        </div>
-        
-        <div class="events-container">
-            <div class="events-header">
-                <div>
-                    <h2 style="margin: 0;">Live Events</h2>
-                    <span class="connection-status" id="connection-status">Connecting...</span>
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <h2>Subscription Settings</h2>
+            
+            <div class="subscription-section">
+                <h3>Subscribe to:</h3>
+                <div class="subscription-option">
+                    <label>
+                        <input type="radio" name="subscription" value="all" checked>
+                        All Events (Firehose)
+                    </label>
                 </div>
-                <button id="clear-events">Clear Events</button>
+                <div class="subscription-option">
+                    <label>
+                        <input type="radio" name="subscription" value="org">
+                        Organization Events
+                    </label>
+                    <div class="subscription-input" id="org-input" style="display: none;">
+                        <input type="text" id="org-id" placeholder="Enter organization ID">
+                    </div>
+                </div>
+                <div class="subscription-option">
+                    <label>
+                        <input type="radio" name="subscription" value="repo">
+                        Repository Events
+                    </label>
+                    <div class="subscription-input" id="repo-input" style="display: none;">
+                        <input type="text" id="repo-id" placeholder="Enter repository ID">
+                    </div>
+                </div>
+                <div class="subscription-option">
+                    <label>
+                        <input type="radio" name="subscription" value="user">
+                        User Activity
+                    </label>
+                    <div class="subscription-input" id="user-input" style="display: none;">
+                        <input type="text" id="user-id" placeholder="Enter user ID">
+                    </div>
+                </div>
+                <div class="subscription-option">
+                    <label>
+                        <input type="radio" name="subscription" value="pr">
+                        Pull Request Events
+                    </label>
+                    <div class="subscription-input" id="pr-input" style="display: none;">
+                        <input type="text" id="pr-repo-id" placeholder="Repository ID">
+                        <input type="text" id="pr-number" placeholder="PR Number" style="margin-top: 5px;">
+                    </div>
+                </div>
+                <div class="subscription-option">
+                    <label>
+                        <input type="radio" name="subscription" value="issue">
+                        Issue Events
+                    </label>
+                    <div class="subscription-input" id="issue-input" style="display: none;">
+                        <input type="text" id="issue-repo-id" placeholder="Repository ID">
+                        <input type="text" id="issue-number" placeholder="Issue Number" style="margin-top: 5px;">
+                    </div>
+                </div>
             </div>
-            <div class="events-list" id="events-list"></div>
+            
+            <div class="filter-section">
+                <h3>Filters</h3>
+                <div class="filter-group">
+                    <label for="event-type-filter">Event Types</label>
+                    <input type="text" id="event-type-filter" placeholder="e.g., push,pull_request">
+                </div>
+                <div class="filter-group">
+                    <label for="action-filter">Actions</label>
+                    <input type="text" id="action-filter" placeholder="e.g., opened,closed">
+                </div>
+            </div>
+            
+            <button class="apply-btn" onclick="applySubscription()">Apply & Connect</button>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Header -->
+            <div class="header">
+                <h1>
+                    Octoflow Events
+                    <span class="connection-status connecting" id="connection-status">Connecting...</span>
+                </h1>
+                <div id="subscription-info"></div>
+            </div>
+            
+            <!-- Stats Bar -->
+            <div class="stats-bar">
+                <div class="stat-item">
+                    <div class="stat-label">Total Events</div>
+                    <div class="stat-value" id="total-events">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Events/Min</div>
+                    <div class="stat-value" id="events-per-minute">0</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Connected Clients</div>
+                    <div class="stat-value" id="connected-clients">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Active Stream</div>
+                    <div class="stat-value" id="active-stream">all</div>
+                </div>
+            </div>
+            
+            <!-- Events -->
+            <div class="events-container">
+                <div class="events-header">
+                    <h2>Live Events</h2>
+                    <button class="clear-btn" onclick="clearEvents()">Clear Events</button>
+                </div>
+                <div id="events-list">
+                    <div class="empty-state">
+                        <h3>Waiting for events...</h3>
+                        <p>Events will appear here as they are received.</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
     
     <script>
         let eventSource = null;
-        let eventCounts = {
+        let stats = {
             total: 0,
-            pull_request: 0,
-            issues: 0
+            eventsPerMinute: 0,
+            timestamps: []
         };
-        let eventTimestamps = [];
+        let currentSubscription = 'all';
         
-        function connectSSE() {
-            // Build query parameters from filters
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            setupSubscriptionHandlers();
+            applySubscription();
+            updateStatsEverySecond();
+        });
+        
+        function setupSubscriptionHandlers() {
+            const radioButtons = document.querySelectorAll('input[name="subscription"]');
+            radioButtons.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    // Hide all inputs
+                    document.querySelectorAll('.subscription-input').forEach(input => {
+                        input.style.display = 'none';
+                    });
+                    
+                    // Show relevant input
+                    const inputId = this.value + '-input';
+                    const inputDiv = document.getElementById(inputId);
+                    if (inputDiv) {
+                        inputDiv.style.display = 'block';
+                    }
+                });
+            });
+        }
+        
+        function applySubscription() {
+            // Close existing connection
+            if (eventSource) {
+                eventSource.close();
+            }
+            
+            // Get selected subscription
+            const selectedRadio = document.querySelector('input[name="subscription"]:checked');
+            const subscriptionType = selectedRadio.value;
+            
+            let url = 'http://localhost:8081';
+            let streamName = 'all';
+            
+            switch (subscriptionType) {
+                case 'all':
+                    url += '/events';
+                    streamName = 'All Events';
+                    break;
+                case 'org':
+                    const orgId = document.getElementById('org-id').value;
+                    if (!orgId) {
+                        alert('Please enter an organization ID');
+                        return;
+                    }
+                    url += `/events/org/${orgId}`;
+                    streamName = `Org: ${orgId}`;
+                    break;
+                case 'repo':
+                    const repoId = document.getElementById('repo-id').value;
+                    if (!repoId) {
+                        alert('Please enter a repository ID');
+                        return;
+                    }
+                    url += `/events/repo/${repoId}`;
+                    streamName = `Repo: ${repoId}`;
+                    break;
+                case 'user':
+                    const userId = document.getElementById('user-id').value;
+                    if (!userId) {
+                        alert('Please enter a user ID');
+                        return;
+                    }
+                    url += `/events/user/${userId}`;
+                    streamName = `User: ${userId}`;
+                    break;
+                case 'pr':
+                    const prRepoId = document.getElementById('pr-repo-id').value;
+                    const prNumber = document.getElementById('pr-number').value;
+                    if (!prRepoId || !prNumber) {
+                        alert('Please enter both repository ID and PR number');
+                        return;
+                    }
+                    url += `/events/pr/${prRepoId}/${prNumber}`;
+                    streamName = `PR: ${prRepoId}#${prNumber}`;
+                    break;
+                case 'issue':
+                    const issueRepoId = document.getElementById('issue-repo-id').value;
+                    const issueNumber = document.getElementById('issue-number').value;
+                    if (!issueRepoId || !issueNumber) {
+                        alert('Please enter both repository ID and issue number');
+                        return;
+                    }
+                    url += `/events/issue/${issueRepoId}/${issueNumber}`;
+                    streamName = `Issue: ${issueRepoId}#${issueNumber}`;
+                    break;
+            }
+            
+            // Add filters
             const params = new URLSearchParams();
+            const eventTypes = document.getElementById('event-type-filter').value;
+            if (eventTypes) params.append('type', eventTypes);
             
-            const eventFilter = document.getElementById('event-filter').value;
-            if (eventFilter) params.append('events', eventFilter);
+            const actions = document.getElementById('action-filter').value;
+            if (actions) params.append('action', actions);
             
-            const repoFilter = document.getElementById('repo-filter').value;
-            if (repoFilter) params.append('repos', repoFilter);
+            if (params.toString()) {
+                url += '?' + params.toString();
+            }
             
-            const orgFilter = document.getElementById('org-filter').value;
-            if (orgFilter) params.append('orgs', orgFilter);
+            // Update UI
+            currentSubscription = streamName;
+            document.getElementById('active-stream').textContent = streamName;
+            document.getElementById('subscription-info').textContent = `Subscribed to: ${streamName}`;
             
-            const url = `http://localhost:8081/events?${params.toString()}`;
-            
+            // Connect to SSE
+            connectSSE(url);
+        }
+        
+        function connectSSE(url) {
             updateConnectionStatus('connecting');
             
             eventSource = new EventSource(url);
             
             eventSource.onopen = function() {
                 updateConnectionStatus('connected');
-                console.log('Connected to SSE server');
+                console.log('Connected to SSE server:', url);
+                fetchStats();
             };
             
             eventSource.onerror = function(error) {
@@ -289,13 +675,22 @@
                 console.error('SSE error:', error);
             };
             
-            // Listen for all event types
+            // Listen for all messages
             eventSource.onmessage = function(event) {
                 handleEvent(JSON.parse(event.data));
             };
             
-            // Listen for specific GitHub event types
-            const eventTypes = ['pull_request', 'issues', 'push', 'release', 'pull_request_review'];
+            // Also listen for specific event types
+            const eventTypes = [
+                'pull_request', 'pull_request_review', 'pull_request_review_comment',
+                'issues', 'issue_comment',
+                'push', 'create', 'delete',
+                'release', 'deployment', 'deployment_status',
+                'fork', 'star', 'watch',
+                'team_add', 'member', 'public',
+                'gollum', 'commit_comment'
+            ];
+            
             eventTypes.forEach(eventType => {
                 eventSource.addEventListener(eventType, function(event) {
                     handleEvent(JSON.parse(event.data));
@@ -304,30 +699,19 @@
         }
         
         function handleEvent(githubEvent) {
-            // Update counts
-            eventCounts.total++;
-            if (eventCounts[githubEvent.event] !== undefined) {
-                eventCounts[githubEvent.event]++;
+            // Update stats
+            stats.total++;
+            stats.timestamps.push(Date.now());
+            
+            // Remove empty state if exists
+            const emptyState = document.querySelector('.empty-state');
+            if (emptyState) {
+                emptyState.remove();
             }
             
-            // Track timestamp for rate calculation
-            eventTimestamps.push(Date.now());
-            
-            // Update UI
-            updateStats();
+            // Add event to list
             addEventToList(githubEvent);
-        }
-        
-        function updateStats() {
-            document.getElementById('total-events').textContent = eventCounts.total;
-            document.getElementById('pr-count').textContent = eventCounts.pull_request;
-            document.getElementById('issues-count').textContent = eventCounts.issues;
-            
-            // Calculate events per minute
-            const now = Date.now();
-            const oneMinuteAgo = now - 60000;
-            const recentEvents = eventTimestamps.filter(ts => ts > oneMinuteAgo);
-            document.getElementById('events-per-minute').textContent = recentEvents.length;
+            updateStats();
         }
         
         function addEventToList(event) {
@@ -337,42 +721,62 @@
             
             const timestamp = new Date(event.received_at).toLocaleTimeString();
             
-            let eventContent = `
-                <div class="event-header">
-                    <div>
-                        <span class="event-type ${event.event}">${event.event}</span>
-            `;
-            
-            // Add PR status if it's a pull request event
-            if (event.event === 'pull_request' && event.payload) {
-                try {
-                    const payload = JSON.parse(event.payload);
-                    if (payload.pull_request) {
-                        const prState = payload.pull_request.merged ? 'merged' : payload.pull_request.state;
-                        eventContent += `<span class="pr-status ${prState}">${prState}</span>`;
-                    }
-                } catch (e) {
-                    console.error('Error parsing payload:', e);
-                }
+            // Build event description
+            let description = '';
+            if (event.action) {
+                description = `Action: ${event.action}`;
             }
             
-            eventContent += `
+            // Parse payload for additional details
+            let prState = '';
+            let issueState = '';
+            try {
+                if (event.payload) {
+                    const payload = typeof event.payload === 'string' ? 
+                        JSON.parse(event.payload) : event.payload;
+                    
+                    if (payload.pull_request) {
+                        prState = payload.pull_request.merged ? 'merged' : payload.pull_request.state;
+                        description = `PR #${payload.pull_request.number}: ${payload.pull_request.title}`;
+                    } else if (payload.issue) {
+                        issueState = payload.issue.state;
+                        description = `Issue #${payload.issue.number}: ${payload.issue.title}`;
+                    } else if (payload.ref && event.event === 'push') {
+                        const branch = payload.ref.replace('refs/heads/', '');
+                        const commitCount = payload.commits ? payload.commits.length : 0;
+                        description = `${commitCount} commit(s) to ${branch}`;
+                    } else if (payload.release) {
+                        description = `Release ${payload.release.tag_name}: ${payload.release.name}`;
+                    }
+                }
+            } catch (e) {
+                console.error('Error parsing payload:', e);
+            }
+            
+            eventItem.innerHTML = `
+                <div class="event-header-row">
+                    <div class="event-badges">
+                        <span class="event-type ${event.event}">${event.event.replace(/_/g, ' ')}</span>
+                        ${event.action ? `<span class="event-action">${event.action}</span>` : ''}
+                        ${prState ? `<span class="event-action">${prState}</span>` : ''}
+                        ${issueState ? `<span class="event-action">${issueState}</span>` : ''}
                     </div>
                     <span class="event-time">${timestamp}</span>
                 </div>
                 <div class="event-details">
-                    <span class="event-repo">${event.repository || 'Unknown'}</span>
-                    ${event.action ? ` - Action: ${event.action}` : ''}
-                    ${event.sender ? ` - By: ${event.sender}` : ''}
+                    ${event.repository ? `<a href="https://github.com/${event.repository}" target="_blank" class="event-repo">${event.repository}</a>` : ''}
+                    ${description ? `<div class="event-description">${description}</div>` : ''}
+                    <div class="event-user">
+                        ${event.sender ? `by <a href="https://github.com/${event.sender}" target="_blank">${event.sender}</a>` : ''}
+                        ${event.metadata ? ` • ${Object.entries(event.metadata).map(([k,v]) => `${k}: ${v}`).join(', ')}` : ''}
+                    </div>
                 </div>
             `;
-            
-            eventItem.innerHTML = eventContent;
             
             // Add to top of list
             eventsList.insertBefore(eventItem, eventsList.firstChild);
             
-            // Limit displayed events to 100
+            // Limit to 100 events
             while (eventsList.children.length > 100) {
                 eventsList.removeChild(eventsList.lastChild);
             }
@@ -384,32 +788,57 @@
             statusElement.textContent = status.charAt(0).toUpperCase() + status.slice(1);
         }
         
-        function reconnectSSE() {
-            if (eventSource) {
-                eventSource.close();
-            }
-            connectSSE();
+        function updateStats() {
+            document.getElementById('total-events').textContent = stats.total;
+            
+            // Calculate events per minute
+            const now = Date.now();
+            const oneMinuteAgo = now - 60000;
+            const recentEvents = stats.timestamps.filter(ts => ts > oneMinuteAgo);
+            stats.eventsPerMinute = recentEvents.length;
+            document.getElementById('events-per-minute').textContent = stats.eventsPerMinute;
+        }
+        
+        function updateStatsEverySecond() {
+            setInterval(() => {
+                updateStats();
+            }, 1000);
+        }
+        
+        function fetchStats() {
+            fetch('http://localhost:8081/stats')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('connected-clients').textContent = 
+                        data.total_clients || '-';
+                })
+                .catch(error => {
+                    console.error('Error fetching stats:', error);
+                });
         }
         
         function clearEvents() {
-            document.getElementById('events-list').innerHTML = '';
-            eventCounts = { total: 0, pull_request: 0, issues: 0 };
-            eventTimestamps = [];
+            const eventsList = document.getElementById('events-list');
+            eventsList.innerHTML = `
+                <div class="empty-state">
+                    <h3>Events cleared</h3>
+                    <p>New events will appear here as they are received.</p>
+                </div>
+            `;
+            stats.total = 0;
+            stats.timestamps = [];
             updateStats();
         }
-        
-        // Connect on page load
-        connectSSE();
-        
-        // Clear events button
-        document.getElementById('clear-events').addEventListener('click', clearEvents);
         
         // Reconnect on window focus
         window.addEventListener('focus', function() {
             if (eventSource && eventSource.readyState === EventSource.CLOSED) {
-                reconnectSSE();
+                applySubscription();
             }
         });
+        
+        // Periodic stats update
+        setInterval(fetchStats, 5000);
     </script>
 </body>
 </html>

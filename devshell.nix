@@ -10,6 +10,7 @@ pkgs.mkShell {
     pkgs.natscli
     pkgs.nats-server
     pkgs.hivemind
+    pkgs.cloudflared
     inputs.gorefresh.packages.${pkgs.system}.default
   ];
 

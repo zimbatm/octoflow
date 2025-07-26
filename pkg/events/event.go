@@ -34,6 +34,9 @@ type GitHubEvent struct {
 	// Processing metadata
 	ProcessingVersion int `json:"processing_version" parquet:"name=processing_version, type=INT32"`
 	Retries           int `json:"retries" parquet:"name=retries, type=INT32"`
+	
+	// Metadata for SSE streaming context
+	Metadata map[string]string `json:"metadata,omitempty"` // Additional metadata for SSE clients
 }
 
 // EventFilter defines criteria for filtering events
