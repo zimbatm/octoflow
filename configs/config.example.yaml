@@ -1,0 +1,86 @@
+# GitHub Organization Events System Configuration Example
+
+webhook:
+  listen_addr: ":8080"
+  secret: "your-github-webhook-secret-here"  # Required: Set this to your GitHub webhook secret
+  max_payload_size: 26214400  # 25MB (GitHub's maximum)
+  request_timeout: "10s"
+  allowed_orgs: []  # Empty means all organizations are allowed
+  # allowed_orgs: ["my-org", "another-org"]  # Restrict to specific organizations
+  health_path: "/health"
+  metrics_path: "/metrics"
+
+nats:
+  servers:
+    - "nats://localhost:4222"
+  subject_prefix: "github.events"
+  jetstream: true
+  stream_name: "GITHUB_EVENTS"
+  stream_replicas: 3
+  stream_max_age: "168h"  # 7 days
+  max_reconnects: 10
+  reconnect_wait: "2s"
+  connection_timeout: "5s"
+  # Authentication (optional)
+  # username: "nats-user"
+  # password: "nats-password"
+  # token: "auth-token"
+  # nkey: "nkey-seed"
+
+s3:
+  region: "us-east-1"
+  bucket: "my-github-events-bucket"  # Required: Set this to your S3 bucket name
+  key_prefix: "github-events"
+  batch_size: 1000
+  batch_timeout: "5m"
+  batch_max_bytes: 104857600  # 100MB
+  compression_type: "snappy"
+  row_group_size: 10000
+  retention_days: 730  # 2 years
+  # AWS credentials (uses default credential chain if not specified)
+  # access_key_id: "AWS_ACCESS_KEY"
+  # secret_access_key: "AWS_SECRET_KEY"
+  # session_token: "AWS_SESSION_TOKEN"
+  # endpoint: "https://s3.amazonaws.com"  # For S3-compatible services
+
+sse:
+  listen_addr: ":8081"
+  allowed_origins:
+    - "*"
+  client_timeout: "30m"
+  keepalive_interval: "30s"
+  event_buffer_size: 100
+  require_auth: false
+  auth_header: "Authorization"
+
+processing:
+  reorder_window: "30s"  # Window for reordering out-of-order events
+  deduplication_ttl: "24h"
+  num_workers: 10
+  
+  # Event filters for different components
+  # NATS filters - can route different event types to different subjects
+  nats_filters:
+    # Example: Route PR events to a specific subject
+    pull_requests:
+      events: ["pull_request", "pull_request_review", "pull_request_review_comment"]
+      
+    # Example: Route security events to a specific subject
+    security:
+      events: ["security_advisory", "secret_scanning_alert", "code_scanning_alert"]
+  
+  # S3 filter - control which events are backed up
+  s3_filter:
+    # Example: Back up everything except ping events
+    events: ["!ping"]  # Use ! to exclude
+  
+  # SSE filter - control which events are streamed
+  sse_filter:
+    # Example: Only stream PR and issue events
+    events: ["pull_request", "issues", "issue_comment"]
+
+monitoring:
+  enabled: true
+  metrics_prefix: "octoflow"
+  log_level: "info"  # debug, info, warn, error
+  log_format: "json"  # json or text
