@@ -47,24 +47,17 @@ The dashboard supports subscribing to different event streams:
 
 2. Access the dashboard at http://localhost:8082
 
-### Finding GitHub IDs
+3. The dashboard will automatically connect to the firehose (all events) on load
 
-To use numeric ID-based subscriptions, you need to find the IDs:
+### Automatic Name to ID Resolution
 
-#### Organization ID
-```bash
-curl -s https://api.github.com/orgs/YOUR_ORG | jq .id
-```
+The dashboard now automatically converts GitHub names to IDs:
 
-#### Repository ID
-```bash
-curl -s https://api.github.com/repos/OWNER/REPO | jq .id
-```
+- **Organizations**: Type the org name (e.g., "octocat") and the dashboard will look up the ID
+- **Repositories**: Type "owner/repo" format and get the ID automatically
+- **Users**: Type the username and the ID is resolved for you
 
-#### User ID
-```bash
-curl -s https://api.github.com/users/USERNAME | jq .id
-```
+You can also directly enter numeric IDs if you already know them. The dashboard will detect numeric input and use it as-is.
 
 ### Subscription Examples
 

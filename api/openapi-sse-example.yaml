@@ -1,0 +1,284 @@
+openapi: 3.1.0
+info:
+  title: Octoflow SSE API
+  version: 1.0.0
+  description: Server-Sent Events API for GitHub webhook event streaming
+
+servers:
+  - url: http://localhost:8081
+    description: Local SSE server
+
+paths:
+  /events:
+    get:
+      summary: Stream all GitHub events
+      description: |
+        Establishes an SSE connection to stream all GitHub webhook events in real-time.
+        Supports resumption via Last-Event-ID header and historical event replay.
+      operationId: streamAllEvents
+      parameters:
+        - name: last
+          in: query
+          description: Number of historical events to replay (default 50)
+          schema:
+            type: integer
+            minimum: 1
+            default: 50
+            example: 100
+        - name: type
+          in: query
+          description: Comma-separated list of event types to filter
+          schema:
+            type: string
+            example: "push,pull_request"
+        - name: action
+          in: query
+          description: Comma-separated list of actions to filter
+          schema:
+            type: string
+            example: "opened,closed"
+        - name: Last-Event-ID
+          in: header
+          description: Resume from a specific event ID
+          schema:
+            type: string
+            example: "3fa3a85c-6a48-11f0-8793-19d640392600"
+      responses:
+        '200':
+          description: SSE stream established
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                enum: ['text/event-stream']
+            Cache-Control:
+              schema:
+                type: string
+                enum: ['no-cache']
+            Connection:
+              schema:
+                type: string
+                enum: ['keep-alive']
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                format: event-stream
+                description: |
+                  Stream of SSE events. Each event follows the SSE protocol:
+                  ```
+                  id: <event-id>
+                  event: <event-type>
+                  data: <json-payload>
+                  
+                  ```
+              examples:
+                connected:
+                  summary: Initial connection event
+                  value: |
+                    event: connected
+                    data: {"status":"connected","stream_id":"all","subject":"github.events.>"}
+                    
+                push:
+                  summary: GitHub push event
+                  value: |
+                    id: 3fa3a85c-6a48-11f0-8793-19d640392600
+                    event: push
+                    data: {"id":"3fa3a85c-6a48-11f0-8793-19d640392600","event":"push","delivery_id":"12345","organization":"octocat","repository":"octocat/Hello-World","payload":{...}}
+                    
+                heartbeat:
+                  summary: Keepalive heartbeat
+                  value: |
+                    : heartbeat
+                    
+  
+  /events/org/{org_id}:
+    get:
+      summary: Stream events for a specific organization
+      description: Stream all GitHub webhook events for a specific organization by ID
+      operationId: streamOrgEvents
+      parameters:
+        - name: org_id
+          in: path
+          required: true
+          description: Numeric organization ID
+          schema:
+            type: string
+            pattern: '^\d+$'
+            example: "1234567"
+        - $ref: '#/components/parameters/LastParam'
+        - $ref: '#/components/parameters/LastEventIdHeader'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+
+  /events/repo/{repo_id}:
+    get:
+      summary: Stream events for a specific repository
+      description: Stream all GitHub webhook events for a specific repository by ID
+      operationId: streamRepoEvents
+      parameters:
+        - name: repo_id
+          in: path
+          required: true
+          description: Numeric repository ID
+          schema:
+            type: string
+            pattern: '^\d+$'
+            example: "1296269"
+        - $ref: '#/components/parameters/LastParam'
+        - $ref: '#/components/parameters/LastEventIdHeader'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+
+  /events/user/{user_id}:
+    get:
+      summary: Stream events for a specific user
+      description: Stream all GitHub webhook events related to a specific user by ID
+      operationId: streamUserEvents
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: Numeric user ID
+          schema:
+            type: string
+            pattern: '^\d+$'
+            example: "583231"
+        - $ref: '#/components/parameters/LastParam'
+        - $ref: '#/components/parameters/LastEventIdHeader'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+
+  /stats:
+    get:
+      summary: Get SSE connection statistics
+      description: Returns current statistics about active SSE connections
+      operationId: getStats
+      responses:
+        '200':
+          description: Connection statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+
+components:
+  parameters:
+    LastParam:
+      name: last
+      in: query
+      description: Number of historical events to replay (default 50)
+      schema:
+        type: integer
+        minimum: 1
+        default: 50
+    
+    LastEventIdHeader:
+      name: Last-Event-ID
+      in: header
+      description: Resume from a specific event ID
+      schema:
+        type: string
+
+  responses:
+    SSEStream:
+      description: SSE stream established
+      headers:
+        Content-Type:
+          schema:
+            type: string
+            enum: ['text/event-stream']
+      content:
+        text/event-stream:
+          schema:
+            $ref: '#/components/schemas/SSEEvent'
+
+  schemas:
+    SSEEvent:
+      type: string
+      format: event-stream
+      description: |
+        Server-Sent Event format. Events are sent as:
+        - `id`: Unique event identifier (GitHub delivery ID)
+        - `event`: GitHub event type (push, pull_request, etc.)
+        - `data`: JSON payload of the GitHub webhook event
+        
+        Special events:
+        - `connected`: Sent when connection is established
+        - `error`: Sent when a stream error occurs
+        - Heartbeat comments (`: heartbeat`) sent every 30 seconds
+      example: |
+        id: 3fa3a85c-6a48-11f0-8793-19d640392600
+        event: push
+        data: {"id":"...","event":"push","delivery_id":"...","payload":{...}}
+
+    GitHubEvent:
+      type: object
+      required:
+        - id
+        - event
+        - delivery_id
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique event ID
+        event:
+          type: string
+          description: GitHub event type
+          example: "push"
+        delivery_id:
+          type: string
+          description: GitHub delivery ID
+        organization:
+          type: string
+          description: Organization name
+        organization_id:
+          type: string
+          description: Organization numeric ID
+        repository:
+          type: string
+          description: Repository full name
+        repository_id:
+          type: string
+          description: Repository numeric ID
+        sender:
+          type: string
+          description: User login who triggered the event
+        sender_id:
+          type: string
+          description: User numeric ID
+        payload:
+          type: object
+          description: Raw GitHub webhook payload
+
+    Stats:
+      type: object
+      properties:
+        total_clients:
+          type: integer
+          description: Total number of connected clients
+        total_events:
+          type: integer
+          description: Total events delivered across all clients
+        clients_by_stream:
+          type: object
+          additionalProperties:
+            type: integer
+          description: Number of clients per stream type
+      example:
+        total_clients: 5
+        total_events: 1234
+        clients_by_stream:
+          all: 2
+          org-1234567: 1
+          repo-1296269: 2
+
+tags:
+  - name: SSE
+    description: Server-Sent Events streaming endpoints
+  - name: Stats
+    description: Statistics and monitoring endpoints

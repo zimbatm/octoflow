@@ -118,20 +118,6 @@ type S3Config struct {
 type SSEConfig struct {
 	// Server address to listen on
 	ListenAddr string `json:"listen_addr" default:":8081"`
-
-	// CORS settings
-	AllowedOrigins []string `json:"allowed_origins" default:"[\"*\"]"`
-
-	// Client settings
-	ClientTimeout     time.Duration `json:"client_timeout" default:"30m"`
-	KeepAliveInterval time.Duration `json:"keepalive_interval" default:"30s"`
-
-	// Buffer settings
-	EventBufferSize int `json:"event_buffer_size" default:"100"`
-
-	// Authentication
-	RequireAuth bool   `json:"require_auth" default:"false"`
-	AuthHeader  string `json:"auth_header" default:"Authorization"`
 }
 
 // ProcessingConfig holds event processing configuration
@@ -266,22 +252,7 @@ func setDefaults(cfg *Config) {
 		cfg.S3.RowGroupSize = 10000
 	}
 
-	// SSE defaults
-	if len(cfg.SSE.AllowedOrigins) == 0 {
-		cfg.SSE.AllowedOrigins = []string{"*"}
-	}
-	if cfg.SSE.ClientTimeout == 0 {
-		cfg.SSE.ClientTimeout = 30 * time.Minute
-	}
-	if cfg.SSE.KeepAliveInterval == 0 {
-		cfg.SSE.KeepAliveInterval = 30 * time.Second
-	}
-	if cfg.SSE.EventBufferSize == 0 {
-		cfg.SSE.EventBufferSize = 100
-	}
-	if cfg.SSE.AuthHeader == "" {
-		cfg.SSE.AuthHeader = "Authorization"
-	}
+	// SSE defaults - only ListenAddr is needed now
 
 	// Processing defaults
 	if cfg.Processing.DeduplicationTTL == 0 {
