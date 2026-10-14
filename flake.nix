@@ -6,10 +6,6 @@
     nixpkgs.url = "github:NixOS/nixpkgs?ref=nixos-unstable";
     blueprint.url = "github:numtide/blueprint";
     blueprint.inputs.nixpkgs.follows = "nixpkgs";
-    gorefresh = {
-      url = "github:draganm/gorefresh";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
   # Load the blueprint

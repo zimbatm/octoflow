@@ -11,7 +11,6 @@ pkgs.mkShell {
     pkgs.nats-server
     pkgs.hivemind
     pkgs.cloudflared
-    inputs.gorefresh.packages.${pkgs.system}.default
   ];
 
   # Add environment variables
