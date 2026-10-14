@@ -156,6 +156,8 @@ func subscribeAndProcess(ctx context.Context, js nats.JetStreamContext, cfg *con
 			if err != nil {
 				if err != nats.ErrTimeout {
 					slog.Error("Error fetching messages", "worker_id", workerID, "error", err)
+					// fetch fails at once while NATS reconnects; do not spin.
+					time.Sleep(time.Second)
 				}
 				continue
 			}

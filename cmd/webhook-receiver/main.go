@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -59,7 +61,7 @@ func main() {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := server.Start(); err != nil {
+		if err := server.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("Webhook server error", "error", err)
 			cancel()
 		}
