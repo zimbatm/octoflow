@@ -81,36 +81,15 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 }
 
-func TestLoadFromEnvMissingRequired(t *testing.T) {
-	// Save and clear env vars
-	oldBucket := os.Getenv("S3_BUCKET")
-	oldRegion := os.Getenv("S3_REGION")
-	oldAccessKey := os.Getenv("S3_ACCESS_KEY_ID")
-	oldSecretKey := os.Getenv("S3_SECRET_ACCESS_KEY")
+func TestLoadFromEnvWithoutS3(t *testing.T) {
+	t.Setenv("S3_BUCKET", "")
 
-	os.Unsetenv("S3_BUCKET")
-	os.Unsetenv("S3_REGION")
-	os.Unsetenv("S3_ACCESS_KEY_ID")
-	os.Unsetenv("S3_SECRET_ACCESS_KEY")
-
-	defer func() {
-		if oldBucket != "" {
-			os.Setenv("S3_BUCKET", oldBucket)
-		}
-		if oldRegion != "" {
-			os.Setenv("S3_REGION", oldRegion)
-		}
-		if oldAccessKey != "" {
-			os.Setenv("S3_ACCESS_KEY_ID", oldAccessKey)
-		}
-		if oldSecretKey != "" {
-			os.Setenv("S3_SECRET_ACCESS_KEY", oldSecretKey)
-		}
-	}()
-
-	_, err := LoadFromEnv()
-	if err == nil {
-		t.Error("Expected error when S3 config is missing")
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv() failed without S3_BUCKET: %v", err)
+	}
+	if err := cfg.S3.Validate(); err == nil {
+		t.Error("Expected S3 validation error when S3_BUCKET is missing")
 	}
 }
 

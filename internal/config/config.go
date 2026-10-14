@@ -173,9 +173,6 @@ func LoadFromEnv() (*Config, error) {
 	// S3 configuration
 	cfg.S3.Region = getEnvOrDefault("AWS_REGION", "us-east-1")
 	cfg.S3.Bucket = os.Getenv("S3_BUCKET")
-	if cfg.S3.Bucket == "" {
-		return nil, fmt.Errorf("S3_BUCKET environment variable is required")
-	}
 	cfg.S3.KeyPrefix = getEnvOrDefault("S3_KEY_PREFIX", "github-events")
 	cfg.S3.Endpoint = os.Getenv("S3_ENDPOINT")
 	cfg.S3.AccessKeyID = os.Getenv("AWS_ACCESS_KEY_ID")
@@ -273,4 +270,12 @@ func setDefaults(cfg *Config) {
 	if cfg.Monitoring.LogFormat == "" {
 		cfg.Monitoring.LogFormat = "json"
 	}
+}
+
+// Validate reports missing settings. Only the s3-worker needs S3, so LoadFromEnv does not call it.
+func (c *S3Config) Validate() error {
+	if c.Bucket == "" {
+		return fmt.Errorf("S3_BUCKET environment variable is required")
+	}
+	return nil
 }

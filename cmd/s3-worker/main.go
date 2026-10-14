@@ -27,6 +27,10 @@ func main() {
 	}
 
 	// Create S3 writer
+	if err := cfg.S3.Validate(); err != nil {
+		log.Fatalf("Invalid S3 configuration: %v", err)
+	}
+
 	s3Writer, err := storage.NewS3Writer(&cfg.S3)
 	if err != nil {
 		log.Fatalf("Failed to create S3 writer: %v", err)
