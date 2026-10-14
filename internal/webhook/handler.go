@@ -1,6 +1,7 @@
 package webhook
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,28 +11,30 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/zimbatm/octoflow/internal/config"
 	"github.com/zimbatm/octoflow/internal/metrics"
+	"github.com/zimbatm/octoflow/internal/retry"
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
+// Publisher must deduplicate by event.ID: GitHub redeliveries reuse the delivery id.
+type Publisher interface {
+	PublishEvent(ctx context.Context, event *events.GitHubEvent) error
+}
+
 // Handler processes GitHub webhook requests
 type Handler struct {
-	config   *config.WebhookConfig
-	eventCh  chan<- *events.GitHubEvent
-	mu       sync.Mutex
-	dedupMap map[string]time.Time // Simple in-memory deduplication
+	config    *config.WebhookConfig
+	publisher Publisher
 }
 
 // NewHandler creates a new webhook handler
-func NewHandler(cfg *config.WebhookConfig, eventCh chan<- *events.GitHubEvent) *Handler {
+func NewHandler(cfg *config.WebhookConfig, publisher Publisher) *Handler {
 	return &Handler{
-		config:   cfg,
-		eventCh:  eventCh,
-		dedupMap: make(map[string]time.Time),
+		config:    cfg,
+		publisher: publisher,
 	}
 }
 
@@ -82,15 +85,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if deliveryID == "" || eventType == "" {
 		http.Error(w, "Missing required GitHub headers", http.StatusBadRequest)
 		status = "missing_headers"
-		return
-	}
-
-	// Check for duplicate delivery
-	if h.isDuplicate(deliveryID) {
-		// Return success for duplicates to prevent GitHub retries
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"duplicate"}`)
-		status = "duplicate"
 		return
 	}
 
@@ -165,23 +159,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Send event to processing channel
-	select {
-	case h.eventCh <- event:
-		// Mark as processed for deduplication
-		h.markProcessed(deliveryID)
-
-		// Return success
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","delivery_id":"%s"}`, deliveryID)
-		status = "success"
-
-	case <-time.After(h.requestTimeout()):
-		// Timeout sending to channel
-		http.Error(w, "Processing timeout", http.StatusServiceUnavailable)
-		status = "timeout"
+	// reply 200 only once the event is stored, so a failed delivery shows as
+	// failed in GitHub and can be redelivered.
+	ctx, cancel := context.WithTimeout(r.Context(), h.requestTimeout())
+	defer cancel()
+	err = retry.Do(ctx, func(ctx context.Context) error {
+		return h.publisher.PublishEvent(ctx, event)
+	}, retry.DefaultConfig())
+	if err != nil {
+		slog.Error("Failed to publish event",
+			"delivery_id", deliveryID,
+			"event_type", eventType,
+			"error", err)
+		http.Error(w, "Failed to store event", http.StatusServiceUnavailable)
+		status = "publish_error"
 		return
 	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, `{"status":"ok","delivery_id":"%s"}`, deliveryID)
+	status = "success"
 }
 
 // validateSignature validates the GitHub webhook signature
@@ -229,31 +226,6 @@ func (h *Handler) isOrgAllowed(org string) bool {
 	}
 
 	return false
-}
-
-// isDuplicate checks if we've already processed this delivery ID
-func (h *Handler) isDuplicate(deliveryID string) bool {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	// Clean up old entries (simple TTL of 24 hours)
-	now := time.Now()
-	for id, timestamp := range h.dedupMap {
-		if now.Sub(timestamp) > 24*time.Hour {
-			delete(h.dedupMap, id)
-		}
-	}
-
-	// Check if exists
-	_, exists := h.dedupMap[deliveryID]
-	return exists
-}
-
-// markProcessed marks a delivery ID as processed
-func (h *Handler) markProcessed(deliveryID string) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.dedupMap[deliveryID] = time.Now()
 }
 
 // a zero timeout makes the select pick randomly between a ready channel and an expired timer.

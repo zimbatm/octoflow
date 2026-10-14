@@ -2,19 +2,22 @@ package webhook
 
 import (
 	"bytes"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/zimbatm/octoflow/internal/config"
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
 func TestHandlerWebhookValidation(t *testing.T) {
-	eventCh := make(chan *events.GitHubEvent, 10)
+	eventCh := make(chanPublisher, 10)
 
 	tests := []struct {
 		name           string
@@ -101,7 +104,7 @@ func TestHandlerWebhookValidation(t *testing.T) {
 }
 
 func TestHandlerEventParsing(t *testing.T) {
-	eventCh := make(chan *events.GitHubEvent, 10)
+	eventCh := make(chanPublisher, 10)
 	cfg := &config.WebhookConfig{
 		Secret:         "",
 		MaxPayloadSize: 26214400, // 25MB
@@ -159,5 +162,34 @@ func TestHandlerEventParsing(t *testing.T) {
 		}
 	default:
 		t.Error("Expected event in channel, got none")
+	}
+}
+
+type chanPublisher chan *events.GitHubEvent
+
+func (c chanPublisher) PublishEvent(ctx context.Context, e *events.GitHubEvent) error {
+	c <- e
+	return nil
+}
+
+type failingPublisher struct{}
+
+func (failingPublisher) PublishEvent(ctx context.Context, e *events.GitHubEvent) error {
+	return errors.New("nats down")
+}
+
+func TestHandlerPublishFailure(t *testing.T) {
+	cfg := &config.WebhookConfig{MaxPayloadSize: 1 << 20, RequestTimeout: time.Second}
+	handler := NewHandler(cfg, failingPublisher{})
+
+	req := httptest.NewRequest("POST", "/webhook", bytes.NewBufferString(`{"action":"opened"}`))
+	req.Header.Set("X-GitHub-Event", "pull_request")
+	req.Header.Set("X-GitHub-Delivery", "test-789")
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected status 503, got %d", rec.Code)
 	}
 }

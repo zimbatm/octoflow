@@ -9,7 +9,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/zimbatm/octoflow/internal/config"
-	"github.com/zimbatm/octoflow/pkg/events"
 )
 
 // Server represents the webhook HTTP server
@@ -17,12 +16,11 @@ type Server struct {
 	config     *config.WebhookConfig
 	httpServer *http.Server
 	handler    *Handler
-	eventCh    chan<- *events.GitHubEvent
 }
 
 // NewServer creates a new webhook server
-func NewServer(cfg *config.WebhookConfig, eventCh chan<- *events.GitHubEvent) *Server {
-	handler := NewHandler(cfg, eventCh)
+func NewServer(cfg *config.WebhookConfig, publisher Publisher) *Server {
+	handler := NewHandler(cfg, publisher)
 
 	mux := http.NewServeMux()
 
@@ -43,12 +41,12 @@ func NewServer(cfg *config.WebhookConfig, eventCh chan<- *events.GitHubEvent) *S
 	return &Server{
 		config:  cfg,
 		handler: handler,
-		eventCh: eventCh,
 		httpServer: &http.Server{
-			Addr:         cfg.ListenAddr,
-			Handler:      mux,
-			ReadTimeout:  cfg.RequestTimeout,
-			WriteTimeout: cfg.RequestTimeout,
+			Addr:        cfg.ListenAddr,
+			Handler:     mux,
+			ReadTimeout: cfg.RequestTimeout,
+			// leave room to write the 503 after a publish times out.
+			WriteTimeout: cfg.RequestTimeout + 5*time.Second,
 			IdleTimeout:  120 * time.Second,
 		},
 	}
