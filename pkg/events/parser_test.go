@@ -259,3 +259,27 @@ func TestEventFilterMatchesPartial(t *testing.T) {
 		t.Error("Filter should not match blocked organization")
 	}
 }
+
+func TestExtractEventEntitiesNumbers(t *testing.T) {
+	tests := []struct {
+		event   string
+		payload string
+		pr      int
+		issue   int
+	}{
+		{"pull_request", `{"pull_request":{"number":42,"user":{"id":7}}}`, 42, 0},
+		{"issue_comment", `{"issue":{"number":1234567},"comment":{"user":{"id":8}}}`, 0, 1234567},
+	}
+	for _, tt := range tests {
+		t.Run(tt.event, func(t *testing.T) {
+			e := &GitHubEvent{Event: tt.event, Payload: []byte(tt.payload)}
+			got, err := ExtractEventEntities(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.PRNumber != tt.pr || got.IssueNumber != tt.issue {
+				t.Errorf("got pr=%d issue=%d, want pr=%d issue=%d", got.PRNumber, got.IssueNumber, tt.pr, tt.issue)
+			}
+		})
+	}
+}

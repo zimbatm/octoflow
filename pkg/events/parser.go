@@ -121,8 +121,8 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 	case "pull_request", "pull_request_review", "pull_request_review_comment":
 		if pr, ok := payload["pull_request"].(map[string]interface{}); ok {
 			// Extract PR number
-			if number, ok := pr["number"].(float64); ok {
-				entities.PRNumber = int(number)
+			if number, ok := toInt(pr["number"]); ok {
+				entities.PRNumber = number
 			}
 
 			// Extract PR author
@@ -167,8 +167,8 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 	case "issues", "issue_comment":
 		if issue, ok := payload["issue"].(map[string]interface{}); ok {
 			// Extract issue number
-			if number, ok := issue["number"].(float64); ok {
-				entities.IssueNumber = int(number)
+			if number, ok := toInt(issue["number"]); ok {
+				entities.IssueNumber = number
 			}
 
 			// Extract issue author
@@ -276,4 +276,15 @@ func ValidateEvent(event *GitHubEvent) error {
 	}
 
 	return nil
+}
+
+func toInt(v interface{}) (int, bool) {
+	switch n := v.(type) {
+	case json.Number:
+		i, err := n.Int64()
+		return int(i), err == nil
+	case float64:
+		return int(n), true
+	}
+	return 0, false
 }
