@@ -24,7 +24,7 @@ if [ -z "${WEBHOOK_SECRET:-}" ]; then
     echo ""
 fi
 
-# If using AWS S3 (not MinIO/LocalStack)
+# If using AWS S3 (not rustfs/LocalStack)
 if [ -z "${S3_ENDPOINT:-}" ]; then
     if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || [ -z "${AWS_SECRET_ACCESS_KEY:-}" ]; then
         echo -e "${YELLOW}Warning: AWS credentials not set. Will use default credential chain.${NC}"

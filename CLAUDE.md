@@ -92,7 +92,7 @@ export WEBHOOK_SECRET="your-github-webhook-secret"
 export WEBHOOK_LISTEN_ADDR=":8080"
 export SSE_LISTEN_ADDR=":8081"
 export NATS_URL="nats://localhost:4222"
-export S3_ENDPOINT="https://your-endpoint.com"  # For R2/MinIO
+export S3_ENDPOINT="https://your-endpoint.com"  # For R2/rustfs
 ```
 
 ## Testing Scripts

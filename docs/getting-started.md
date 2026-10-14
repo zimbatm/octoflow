@@ -8,7 +8,7 @@ Before starting, ensure you have:
 
 - Go 1.21+ installed
 - Access to a NATS server (or Docker to run one)
-- An S3 bucket (AWS S3, Cloudflare R2, MinIO, etc.)
+- An S3 bucket (AWS S3, Cloudflare R2, rustfs, etc.)
 - Admin access to your GitHub organization
 
 ## Step 1: Install Octoflow

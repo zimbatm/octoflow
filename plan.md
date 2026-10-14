@@ -10,7 +10,7 @@ Comprehensive development plan for implementing an enhanced Server-Sent Events (
   - Ensure all dependencies are properly installed
 - [ ] Configure local NATS JetStream instance for testing
   - Set up appropriate streams and consumers
-- [ ] Set up S3-compatible storage (MinIO) for local development
+- [ ] Set up S3-compatible storage (rustfs) for local development
   - Configure buckets for event storage
 - [ ] Create development configuration files
   - SSE server configuration

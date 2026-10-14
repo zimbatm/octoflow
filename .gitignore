@@ -54,3 +54,6 @@ configs/*.secret.yml
 # Test coverage
 coverage.txt
 coverage.html
+
+# Local rustfs data
+.data/

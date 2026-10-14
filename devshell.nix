@@ -10,6 +10,7 @@ pkgs.mkShell {
     pkgs.natscli
     pkgs.nats-server
     pkgs.hivemind
+    pkgs.rustfs
     pkgs.cloudflared
   ];
 
