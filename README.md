@@ -6,7 +6,8 @@ Octoflow captures GitHub webhook events and distributes them through NATS JetStr
 
 - **Two-stage event routing**: Organization-based primary stream → entity-specific dispatch
 - **Rename-proof subscriptions**: Uses GitHub numeric IDs instead of names
-- **Automatic deduplication**: NATS JetStream prevents duplicate events using GitHub delivery ID
+- **Automatic deduplication**: NATS JetStream prevents duplicate events using the GitHub delivery ID or event ID
+- **Repositories without a webhook**: `public-ingest` reads the public Events API and GH Archive (best-effort, see below)
 - **Multi-dimensional routing**: Subscribe by org, repo, user, PR, or issue
 - **S3 backup**: Parquet files with daily partitioning for long-term storage
 - **Real-time streaming**: SSE endpoint for web applications
@@ -15,12 +16,12 @@ Octoflow captures GitHub webhook events and distributes them through NATS JetStr
 ## Architecture
 
 ```
-GitHub Webhooks
-      |
-      v
-Webhook Receiver (Port 8080)
-      |
-      v
+GitHub Webhooks                 Events API + GH Archive
+      |                                  |
+      v                                  v
+Webhook Receiver (Port 8080)      public-ingest
+      |                                  |
+      v                                  v
 NATS JetStream - Primary Stream
   └── github.events.org.{org_id}.{event_type}
   └── github.events.global.{event_type}
@@ -55,6 +56,69 @@ Event Dispatcher (Entity Router)
 - **Reliability**: Primary stream captures everything, dispatcher can retry
 - **Flexibility**: Add new routing dimensions without changing webhook receiver
 - **Simplicity**: Each component has a single responsibility
+
+## Event Sources: What Is Complete
+
+Octoflow has two ingests. Both publish to the same subjects in the same
+shape, so a consumer reads one stream. `metadata.source` tells where an
+event came from, if a consumer needs it.
+
+| Source | Used for | Complete? | Delay | Payload |
+|---|---|---|---|---|
+| Webhook receiver | Repositories and organizations we can add a webhook to (`numtide`) | **Yes**. GitHub sends every subscribed event. A failed delivery gets a 503 and can be redelivered. | Seconds | Full webhook payload |
+| `public-ingest`: Events API | Repositories we cannot add a webhook to (`NixOS/nixpkgs`) | **No, best-effort.** | 30 s to 6 h | Trimmed |
+| `public-ingest`: GH Archive | Fills gaps from the Events API | **No, best-effort.** | About 1 h 10 min | Trimmed |
+
+What "best-effort" means, measured for `NixOS/nixpkgs` on 2026-10-14:
+
+- The Events API keeps only the newest 300 events of a repository, for at
+  most 30 days. GitHub says it is "not built to serve real-time use cases"
+  and that delays go from 30 s to 6 h
+  ([docs](https://docs.github.com/en/rest/activity/events)). For 24 hours it
+  held 277 nixpkgs events, while 1537 nixpkgs issues and pull requests
+  changed in the same 24 hours. Most activity never shows up.
+- GH Archive is built from the same public timeline
+  ([gharchive.org](https://www.gharchive.org/)). Its hourly files held 6 to 7
+  nixpkgs events per hour. Some hours are missing for good.
+- Since 2025-10-07 the Events API trims payloads. A `pull_request` event
+  carries only `id`, `number`, `url`, `base` and `head` of the pull request,
+  without title, state or author. A `push` event has no commit list
+  ([changelog](https://github.blog/changelog/2025-08-08-upcoming-changes-to-github-events-api-payloads/)).
+  Fetch the object from the API when you need more.
+- The Events API covers 16 event types. Webhook-only types such as
+  `check_run`, `status` or `workflow_run` never arrive for nixpkgs.
+
+Use the public events as a hint that something changed, not as a record of
+everything that changed.
+
+### How the public events are rewritten
+
+- The id is `gh-event-<github event id>`. GH Archive keeps the Events API
+  ids, so JetStream drops an event that both sources deliver (within its
+  24 h deduplication window).
+- `PullRequestReviewCommentEvent` becomes `pull_request_review_comment`, and
+  so on.
+- The payload gains the `repository`, `sender` and `organization` objects of
+  a webhook, so the subjects use the same numeric ids.
+- `metadata.created_at` is the time GitHub recorded the event;
+  `received_at` is when octoflow read it.
+
+Do not list a repository in `PUBLIC_REPOS` that also has a webhook. Webhook
+deliveries and public events have different ids, so each event would
+arrive twice.
+
+### public-ingest configuration
+
+```bash
+PUBLIC_REPOS=NixOS/nixpkgs      # comma-separated, required
+GITHUB_TOKEN=...                # optional; without it, 60 requests per hour
+EVENTS_API_ENABLED=true
+EVENTS_API_INTERVAL=1m          # GitHub's X-Poll-Interval wins when longer
+GHARCHIVE_ENABLED=true
+GHARCHIVE_START=2026-10-14T00:00:00Z   # first run only; default: 3 hours ago
+```
+
+Progress is kept in the NATS KV bucket `octoflow_public_ingest`.
 
 ## Quick Start
 
@@ -166,13 +230,22 @@ sub, _ := js.Subscribe("github.events.pr.87654321.456", func(msg *nats.Msg) {
 
 ### JavaScript (SSE)
 
+Each event is a named SSE event (`pull_request`, `push`, ...). Its `id` is
+the JetStream sequence, so the browser resumes after a reconnect with
+`Last-Event-ID`. `?last=N` (at most 1000) replays the last N matching
+events first; `?type=` and `?action=` filter.
+
 ```javascript
-const events = new EventSource('http://localhost:8081/events?events=pull_request');
-events.onmessage = (event) => {
+const events = new EventSource('https://events.nixpkgs.org/events/repo/4542716?type=pull_request&last=20');
+events.addEventListener('pull_request', (event) => {
   const data = JSON.parse(event.data);
-  console.log(`PR ${data.action}: ${data.pull_request.title}`);
-};
+  console.log(`PR #${data.payload.number} ${data.action} by ${data.sender}`);
+});
 ```
+
+Routes: `/events` (all), `/events/org/{id}`, `/events/repo/{id}`,
+`/events/user/{id}`, `/events/pr/{repo_id}/{number}`,
+`/events/issue/{repo_id}/{number}`, `/events/type/{event}`.
 
 ## Common Use Cases
 
@@ -282,6 +355,34 @@ processing:
 - S3 batching: 1000 events or 5 minutes
 - SSE connections: 1000+ concurrent
 - Event dispatcher: Parallel workers for routing
+
+### NixOS
+
+The flake exports `nixosModules.default`. It runs NATS with JetStream on
+127.0.0.1, one systemd unit per component, and nginx with ACME:
+
+```nix
+{
+  imports = [ inputs.octoflow.nixosModules.default ];
+  services.octoflow = {
+    enable = true;
+    domain = "events.nixpkgs.org";
+    webhook.environmentFile = "/run/secrets/octoflow-webhook";   # WEBHOOK_SECRET=
+    s3 = {
+      bucket = "octoflow";
+      endpoint = "https://<account>.r2.cloudflarestorage.com";
+      environmentFile = "/run/secrets/octoflow-s3";   # AWS_ACCESS_KEY_ID=, AWS_SECRET_ACCESS_KEY=
+    };
+    publicIngest = {
+      repos = [ "NixOS/nixpkgs" ];
+      environmentFile = "/run/secrets/octoflow-github";   # GITHUB_TOKEN=
+    };
+  };
+}
+```
+
+`nix flake check` builds the binaries, runs the Go tests and runs
+`checks/nixos.nix`, a VM test of this module.
 
 ## Troubleshooting
 
