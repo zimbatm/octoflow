@@ -118,57 +118,60 @@ func createRouter(sseHandler *sse.Handler, cfg *config.Config) *mux.Router {
 
 	// All events (firehose)
 	router.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-		handleSSE(w, r, sseHandler, "all", cfg.NATS.SubjectPrefix+".>")
+		handleSSE(w, r, sseHandler, "all", natsInternal.PrimarySubjects(cfg.NATS.SubjectPrefix))
 	})
 
 	// Organization events
-	router.HandleFunc("/events/org/{org_id}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/events/org/{org_id:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		orgID := vars["org_id"]
 		subject := fmt.Sprintf("%s.org.%s.>", cfg.NATS.SubjectPrefix, orgID)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("org-%s", orgID), subject)
+		handleSSE(w, r, sseHandler, fmt.Sprintf("org-%s", orgID), []string{subject})
 	})
 
 	// Repository events
-	router.HandleFunc("/events/repo/{repo_id}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/events/repo/{repo_id:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		repoID := vars["repo_id"]
 		subject := fmt.Sprintf("%s.repo.%s.>", cfg.NATS.SubjectPrefix, repoID)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("repo-%s", repoID), subject)
+		handleSSE(w, r, sseHandler, fmt.Sprintf("repo-%s", repoID), []string{subject})
 	})
 
 	// User activity events
-	router.HandleFunc("/events/user/{user_id}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/events/user/{user_id:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		userID := vars["user_id"]
 		subject := fmt.Sprintf("%s.user.%s.*", cfg.NATS.SubjectPrefix, userID)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("user-%s", userID), subject)
+		handleSSE(w, r, sseHandler, fmt.Sprintf("user-%s", userID), []string{subject})
 	})
 
 	// PR-specific events
-	router.HandleFunc("/events/pr/{repo_id}/{pr_number}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/events/pr/{repo_id:[0-9]+}/{pr_number:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		repoID := vars["repo_id"]
 		prNumber := vars["pr_number"]
 		subject := fmt.Sprintf("%s.pr.%s.%s.>", cfg.NATS.SubjectPrefix, repoID, prNumber)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("pr-%s-%s", repoID, prNumber), subject)
+		handleSSE(w, r, sseHandler, fmt.Sprintf("pr-%s-%s", repoID, prNumber), []string{subject})
 	})
 
 	// Issue-specific events
-	router.HandleFunc("/events/issue/{repo_id}/{issue_number}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/events/issue/{repo_id:[0-9]+}/{issue_number:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		repoID := vars["repo_id"]
 		issueNumber := vars["issue_number"]
 		subject := fmt.Sprintf("%s.issue.%s.%s.>", cfg.NATS.SubjectPrefix, repoID, issueNumber)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("issue-%s-%s", repoID, issueNumber), subject)
+		handleSSE(w, r, sseHandler, fmt.Sprintf("issue-%s-%s", repoID, issueNumber), []string{subject})
 	})
 
 	// Event type filtering across all repos
-	router.HandleFunc("/events/type/{event_type}", func(w http.ResponseWriter, r *http.Request) {
+	router.HandleFunc("/events/type/{event_type:[a-z_]+}", func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
 		eventType := vars["event_type"]
-		subject := fmt.Sprintf("%s.*.*.%s", cfg.NATS.SubjectPrefix, eventType)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("type-%s", eventType), subject)
+		subjects := []string{
+			fmt.Sprintf("%s.org.*.%s", cfg.NATS.SubjectPrefix, eventType),
+			fmt.Sprintf("%s.global.%s", cfg.NATS.SubjectPrefix, eventType),
+		}
+		handleSSE(w, r, sseHandler, fmt.Sprintf("type-%s", eventType), subjects)
 	})
 
 	// API endpoints
@@ -200,7 +203,7 @@ func setCORSHeaders(w http.ResponseWriter) {
 }
 
 // handleSSE handles SSE connections
-func handleSSE(w http.ResponseWriter, r *http.Request, handler *sse.Handler, streamID, natsSubject string) {
+func handleSSE(w http.ResponseWriter, r *http.Request, handler *sse.Handler, streamID string, subjects []string) {
 	// Set CORS headers
 	setCORSHeaders(w)
 
@@ -213,7 +216,7 @@ func handleSSE(w http.ResponseWriter, r *http.Request, handler *sse.Handler, str
 	filter := createFilterFromQuery(r)
 
 	// Let the SSE handler take over
-	handler.ServeHTTP(w, r, streamID, natsSubject, filter)
+	handler.ServeHTTP(w, r, streamID, subjects, filter)
 }
 
 // createFilterFromQuery creates an event filter from query parameters

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -31,7 +32,7 @@ type ClientConnection struct {
 	StreamID   string
 	Subject    string
 	StartTime  time.Time
-	EventCount int64
+	EventCount atomic.Int64
 }
 
 // NewHandler creates a new SSE handler
@@ -45,7 +46,7 @@ func NewHandler(nc *nats.Conn, js nats.JetStreamContext, cfg *config.NATSConfig)
 }
 
 // ServeHTTP handles SSE connections
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID, natsSubject string, filter *events.EventFilter) {
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID string, subjects []string, filter *events.EventFilter) {
 	// Create SSE writer
 	sseWriter, err := NewWriter(w)
 	if err != nil {
@@ -69,7 +70,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID, na
 	client := &ClientConnection{
 		ID:        clientID,
 		StreamID:  streamID,
-		Subject:   natsSubject,
+		Subject:   strings.Join(subjects, ","),
 		StartTime: time.Now(),
 	}
 
@@ -83,11 +84,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID, na
 	ctx := r.Context()
 
 	// Create NATS subscription with JetStream
-	sub, err := h.createSubscription(ctx, natsSubject, lastEventID, lastCount)
+	sub, err := h.createSubscription(ctx, subjects, lastEventID, lastCount)
 	if err != nil {
 		slog.Error("Failed to create NATS subscription",
 			"error", err,
-			"subject", natsSubject,
+			"subjects", subjects,
 			"client_id", clientID)
 		sseWriter.WriteEvent("", "error", []byte(`{"error":"Failed to create subscription"}`))
 		return
@@ -98,7 +99,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID, na
 	connectedMsg := map[string]string{
 		"status":    "connected",
 		"stream_id": streamID,
-		"subject":   natsSubject,
+		"subjects":  strings.Join(subjects, ","),
 	}
 	connectedData, _ := json.Marshal(connectedMsg)
 	sseWriter.WriteEvent("", "connected", connectedData)
@@ -120,6 +121,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID, na
 				if err != nil {
 					if err == nats.ErrTimeout {
 						continue
+					}
+					if ctx.Err() != nil {
+						return
 					}
 					// For any other error, log and exit
 					slog.Error("Error fetching messages", "error", err, "client_id", clientID)
@@ -160,111 +164,139 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID, na
 			}
 
 		case msg := <-msgCh:
-			// Parse event
 			var event events.GitHubEvent
 			if err := json.Unmarshal(msg.Data, &event); err != nil {
 				slog.Error("Failed to unmarshal event", "error", err)
-				msg.Nak()
 				continue
 			}
 
-			// Apply filter if provided
 			if filter != nil && !filter.Matches(&event) {
-				msg.Ack()
 				continue
 			}
 
-			// Send event to client
-			if err := sseWriter.WriteEvent(event.ID, event.Event, msg.Data); err != nil {
-				// Client disconnected
-				msg.Nak()
+			meta, err := msg.Metadata()
+			if err != nil {
+				slog.Error("Message without JetStream metadata", "error", err)
+				continue
+			}
+			id := strconv.FormatUint(meta.Sequence.Stream, 10)
+			if err := sseWriter.WriteEvent(id, event.Event, msg.Data); err != nil {
 				return
 			}
 
-			// Update stats
-			client.EventCount++
-
-			// Acknowledge message
-			msg.Ack()
+			client.EventCount.Add(1)
 		}
 	}
 }
 
-// createSubscription creates a NATS JetStream subscription
-func (h *Handler) createSubscription(ctx context.Context, subject string, lastEventID string, lastCount int) (*nats.Subscription, error) {
-	// Create consumer config
-	consumerName := fmt.Sprintf("sse-%s-%d", sanitizeConsumerName(subject), time.Now().UnixNano())
+// maxLast bounds the replay a client can ask for with ?last=.
+const maxLast = 1000
 
-	config := &nats.ConsumerConfig{
-		Durable:       consumerName,
-		AckPolicy:     nats.AckExplicitPolicy,
-		FilterSubject: subject,
-		MaxAckPending: 100,
-		AckWait:       30 * time.Second,
-		MaxDeliver:    1,
+var consumerSeq atomic.Uint64
+
+func (h *Handler) consumerName() string {
+	return fmt.Sprintf("sse-%d-%d", time.Now().UnixNano(), consumerSeq.Add(1))
+}
+
+// createSubscription creates a consumer that the server deletes once idle. Last-Event-ID is the
+// stream sequence of the last event the client saw.
+func (h *Handler) createSubscription(ctx context.Context, subjects []string, lastEventID string, lastCount int) (*nats.Subscription, error) {
+	name := h.consumerName()
+	cc := &nats.ConsumerConfig{
+		Durable:        name,
+		AckPolicy:      nats.AckNonePolicy,
+		FilterSubjects: subjects,
+		DeliverPolicy:  nats.DeliverNewPolicy,
+		// the server removes consumers of clients that vanish without cleanup.
+		InactiveThreshold: time.Minute,
 	}
 
-	// If we have a last event ID, try to resume from there
-	if lastEventID != "" {
-		// For resumption, we'd need to store sequence numbers with event IDs
-		// For now, we'll start from new messages
-		config.DeliverPolicy = nats.DeliverNewPolicy
-		slog.Info("Event resumption requested", "last_event_id", lastEventID)
-	} else {
-		// Get stream info to calculate start sequence
-		streamInfo, err := h.js.StreamInfo(h.cfg.StreamName)
+	if seq, err := strconv.ParseUint(lastEventID, 10, 64); err == nil {
+		cc.DeliverPolicy = nats.DeliverByStartSequencePolicy
+		cc.OptStartSeq = seq + 1
+	} else if lastCount > 0 {
+		start, err := h.startSeqForLast(subjects, lastCount)
 		if err != nil {
-			return nil, fmt.Errorf("failed to get stream info: %w", err)
+			return nil, err
 		}
-
-		// Calculate start sequence for last N messages
-		if streamInfo.State.Msgs > 0 {
-			var startSeq uint64
-			if streamInfo.State.LastSeq >= uint64(lastCount) {
-				startSeq = streamInfo.State.LastSeq - uint64(lastCount) + 1
-			} else {
-				// Not enough messages, start from the beginning
-				startSeq = streamInfo.State.FirstSeq
-			}
-
-			// Ensure we don't go before the first sequence
-			if startSeq < streamInfo.State.FirstSeq {
-				startSeq = streamInfo.State.FirstSeq
-			}
-
-			config.DeliverPolicy = nats.DeliverByStartSequencePolicy
-			config.OptStartSeq = startSeq
-			slog.Info("Starting from sequence",
-				"start_seq", startSeq,
-				"first_seq", streamInfo.State.FirstSeq,
-				"last_seq", streamInfo.State.LastSeq,
-				"total_msgs", streamInfo.State.Msgs,
-				"requested_last", lastCount)
-		} else {
-			// No messages, start with new ones
-			config.DeliverPolicy = nats.DeliverNewPolicy
+		if start > 0 {
+			cc.DeliverPolicy = nats.DeliverByStartSequencePolicy
+			cc.OptStartSeq = start
 		}
 	}
 
-	// Create consumer
-	_, err := h.js.AddConsumer(h.cfg.StreamName, config)
-	if err != nil {
+	if _, err := h.js.AddConsumer(h.cfg.StreamName, cc); err != nil {
 		return nil, fmt.Errorf("failed to create consumer: %w", err)
 	}
-
-	// Create subscription
-	sub, err := h.js.PullSubscribe(subject, consumerName)
+	sub, err := h.js.PullSubscribe("", name, nats.Bind(h.cfg.StreamName, name))
 	if err != nil {
+		h.js.DeleteConsumer(h.cfg.StreamName, name)
 		return nil, fmt.Errorf("failed to create subscription: %w", err)
 	}
 
-	// Clean up consumer when done
 	go func() {
 		<-ctx.Done()
-		h.js.DeleteConsumer(h.cfg.StreamName, consumerName)
+		h.js.DeleteConsumer(h.cfg.StreamName, name)
 	}()
 
 	return sub, nil
+}
+
+// startSeqForLast returns the sequence from which exactly the last n
+// messages matching subjects remain, or 0 if the stream is empty. The
+// stream holds fan-out copies of other subjects in between, so
+// LastSeq-n is wrong for any filter; a binary search on NumPending is not.
+func (h *Handler) startSeqForLast(subjects []string, n int) (uint64, error) {
+	if n > maxLast {
+		n = maxLast
+	}
+	si, err := h.js.StreamInfo(h.cfg.StreamName)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get stream info: %w", err)
+	}
+	if si.State.Msgs == 0 {
+		return 0, nil
+	}
+
+	lo, hi := si.State.FirstSeq, si.State.LastSeq
+	total, err := h.pendingFrom(subjects, lo)
+	if err != nil {
+		return 0, err
+	}
+	if total <= uint64(n) {
+		return lo, nil
+	}
+	// invariant: pendingFrom(lo) >= n
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		p, err := h.pendingFrom(subjects, mid)
+		if err != nil {
+			return 0, err
+		}
+		if p >= uint64(n) {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return lo, nil
+}
+
+func (h *Handler) pendingFrom(subjects []string, seq uint64) (uint64, error) {
+	name := h.consumerName()
+	info, err := h.js.AddConsumer(h.cfg.StreamName, &nats.ConsumerConfig{
+		Durable:           name,
+		AckPolicy:         nats.AckNonePolicy,
+		FilterSubjects:    subjects,
+		DeliverPolicy:     nats.DeliverByStartSequencePolicy,
+		OptStartSeq:       seq,
+		InactiveThreshold: 10 * time.Second,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to probe stream: %w", err)
+	}
+	h.js.DeleteConsumer(h.cfg.StreamName, name)
+	return info.NumPending, nil
 }
 
 // registerClient registers a new client connection
@@ -289,7 +321,7 @@ func (h *Handler) unregisterClient(clientID string) {
 			"client_id", clientID,
 			"stream_id", client.StreamID,
 			"duration", duration,
-			"event_count", client.EventCount)
+			"event_count", client.EventCount.Load())
 		delete(h.clients, clientID)
 	}
 }
@@ -304,7 +336,7 @@ func (h *Handler) GetStats() map[string]interface{} {
 
 	for _, client := range h.clients {
 		streamStats[client.StreamID]++
-		totalEvents += client.EventCount
+		totalEvents += client.EventCount.Load()
 	}
 
 	return map[string]interface{}{
@@ -312,13 +344,4 @@ func (h *Handler) GetStats() map[string]interface{} {
 		"total_events":      totalEvents,
 		"clients_by_stream": streamStats,
 	}
-}
-
-// sanitizeConsumerName creates a valid NATS consumer name
-func sanitizeConsumerName(subject string) string {
-	// Replace invalid characters with underscores
-	name := strings.ReplaceAll(subject, ".", "_")
-	name = strings.ReplaceAll(name, "*", "star")
-	name = strings.ReplaceAll(name, ">", "all")
-	return name
 }
