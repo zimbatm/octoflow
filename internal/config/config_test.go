@@ -50,8 +50,8 @@ func TestLoadFromEnv(t *testing.T) {
 		t.Errorf("Expected webhook listen addr :8080, got %s", cfg.Webhook.ListenAddr)
 	}
 
-	if cfg.NATS.StreamName != "GITHUB_EVENTS" {
-		t.Errorf("Expected stream name GITHUB_EVENTS, got %s", cfg.NATS.StreamName)
+	if cfg.NATS.StreamName != "GITHUB_EVENTS_RAW" {
+		t.Errorf("Expected stream name GITHUB_EVENTS_RAW, got %s", cfg.NATS.StreamName)
 	}
 
 	if cfg.SSE.ListenAddr != ":8081" {
