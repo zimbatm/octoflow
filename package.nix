@@ -13,9 +13,15 @@ pkgs.buildGoModule {
       ./web
     ];
   };
-  vendorHash = pkgs.lib.fakeHash;
+  vendorHash = "sha256-kVcX5ZSCzXyMpT6dF+ptyXN1v4zNxQUd3WGteyf4DAo=";
   subPackages = [ "cmd/..." ];
   env.CGO_ENABLED = 0;
+  # subPackages limits the default checkPhase to cmd/, which has no tests.
+  checkPhase = ''
+    runHook preCheck
+    go test ./internal/... ./pkg/...
+    runHook postCheck
+  '';
   postInstall = ''
     mkdir -p $out/share/octoflow
     cp -r web $out/share/octoflow/
