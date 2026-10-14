@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/zimbatm/octoflow/internal/config"
@@ -21,6 +22,7 @@ import (
 type Handler struct {
 	config   *config.WebhookConfig
 	eventCh  chan<- *events.GitHubEvent
+	mu       sync.Mutex
 	dedupMap map[string]time.Time // Simple in-memory deduplication
 }
 
@@ -174,7 +176,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `{"status":"ok","delivery_id":"%s"}`, deliveryID)
 		status = "success"
 
-	case <-time.After(h.config.RequestTimeout):
+	case <-time.After(h.requestTimeout()):
 		// Timeout sending to channel
 		http.Error(w, "Processing timeout", http.StatusServiceUnavailable)
 		status = "timeout"
@@ -231,6 +233,9 @@ func (h *Handler) isOrgAllowed(org string) bool {
 
 // isDuplicate checks if we've already processed this delivery ID
 func (h *Handler) isDuplicate(deliveryID string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	// Clean up old entries (simple TTL of 24 hours)
 	now := time.Now()
 	for id, timestamp := range h.dedupMap {
@@ -246,5 +251,15 @@ func (h *Handler) isDuplicate(deliveryID string) bool {
 
 // markProcessed marks a delivery ID as processed
 func (h *Handler) markProcessed(deliveryID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
 	h.dedupMap[deliveryID] = time.Now()
+}
+
+// a zero timeout makes the select pick randomly between a ready channel and an expired timer.
+func (h *Handler) requestTimeout() time.Duration {
+	if h.config.RequestTimeout > 0 {
+		return h.config.RequestTimeout
+	}
+	return 10 * time.Second
 }
