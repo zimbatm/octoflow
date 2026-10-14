@@ -32,14 +32,13 @@ func NewSchemaManager(nc *nats.Conn, cfg *config.NATSConfig) (*SchemaManager, er
 func (m *SchemaManager) InitializeSchema() error {
 	slog.Info("Initializing NATS JetStream schema")
 
-
 	// Initialize single deduplicated events stream
 	// All events go here, deduplication handled by NATS JetStream
 	if err := m.ensureStream(StreamConfig{
 		Name:         m.config.StreamName,
 		Description:  "Deduplicated GitHub webhook events",
 		Subjects:     []string{m.config.SubjectPrefix + ".>"}, // Flexible depth for org.{id}.{event} or global.{event}
-		MaxConsumers: -1, // Unlimited consumers
+		MaxConsumers: -1,                                      // Unlimited consumers
 	}); err != nil {
 		return fmt.Errorf("failed to ensure events stream: %w", err)
 	}
@@ -47,7 +46,6 @@ func (m *SchemaManager) InitializeSchema() error {
 	slog.Info("NATS JetStream schema initialization complete")
 	return nil
 }
-
 
 // StreamConfig holds stream configuration
 type StreamConfig struct {
@@ -70,7 +68,7 @@ func (m *SchemaManager) ensureStream(sc StreamConfig) error {
 		Retention:   nats.LimitsPolicy,
 		Duplicates:  24 * time.Hour, // Deduplication window
 	}
-	
+
 	// Set max consumers if specified
 	if sc.MaxConsumers != 0 {
 		streamConfig.MaxConsumers = sc.MaxConsumers

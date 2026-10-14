@@ -298,7 +298,7 @@ func checkDependabot(event *events.GitHubEvent) *SecurityAlert {
 func isSuspiciousActivity(event *events.GitHubEvent) bool {
 	// Check for rapid-fire events from same user
 	// In production, you'd track this across multiple events
-	
+
 	// Check for events at unusual hours
 	hour := event.ReceivedAt.Hour()
 	if hour >= 2 && hour <= 5 {

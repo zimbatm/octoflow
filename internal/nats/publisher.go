@@ -124,11 +124,11 @@ func (p *Publisher) PublishBatch(ctx context.Context, events []*events.GitHubEve
 func (p *Publisher) buildSubject(event *events.GitHubEvent) string {
 	// Use simplified pattern: org.{org_id}.{event_type}
 	// or global.{event_type} for non-org events
-	
+
 	if event.OrganizationID != "" {
 		return fmt.Sprintf("%s.org.%s.%s", p.config.SubjectPrefix, event.OrganizationID, event.Event)
 	}
-	
+
 	// For events without organization context (e.g., user events, global events)
 	return fmt.Sprintf("%s.global.%s", p.config.SubjectPrefix, event.Event)
 }

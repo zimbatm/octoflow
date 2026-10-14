@@ -10,11 +10,11 @@ import (
 // ParseCommonFields extracts common fields from a GitHub webhook payload
 func ParseCommonFields(event *GitHubEvent) error {
 	var payload map[string]interface{}
-	
+
 	// Use json.Decoder with UseNumber to preserve integer precision
 	decoder := json.NewDecoder(bytes.NewReader(event.Payload))
 	decoder.UseNumber()
-	
+
 	if err := decoder.Decode(&payload); err != nil {
 		return fmt.Errorf("failed to unmarshal payload: %w", err)
 	}
@@ -24,7 +24,7 @@ func ParseCommonFields(event *GitHubEvent) error {
 		if fullName, ok := repo["full_name"].(string); ok {
 			event.Repository = fullName
 		}
-		
+
 		// Extract repository ID
 		if id, ok := repo["id"]; ok {
 			event.RepositoryID = formatID(id)
@@ -57,7 +57,7 @@ func ParseCommonFields(event *GitHubEvent) error {
 	if action, ok := payload["action"].(string); ok {
 		event.Action = action
 	}
-	
+
 	// Extract organization ID directly if present (for org-level events)
 	if org, ok := payload["organization"].(map[string]interface{}); ok {
 		if id, ok := org["id"]; ok {
@@ -91,32 +91,31 @@ func formatID(id interface{}) string {
 	}
 }
 
-
 // ExtractEventEntities extracts all entities involved in a GitHub event
 // This is used by the event dispatcher to route events to entity-specific subjects
 func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 	var payload map[string]interface{}
-	
+
 	// Use json.Decoder with UseNumber to preserve integer precision
 	decoder := json.NewDecoder(bytes.NewReader(event.Payload))
 	decoder.UseNumber()
-	
+
 	if err := decoder.Decode(&payload); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal payload: %w", err)
 	}
-	
+
 	entities := &EventEntities{
 		OrganizationID: event.OrganizationID,
 		RepositoryID:   event.RepositoryID,
 		SenderID:       event.SenderID,
 		UserIDs:        []string{},
 	}
-	
+
 	// Add sender to user IDs if present
 	if event.SenderID != "" {
 		entities.UserIDs = append(entities.UserIDs, event.SenderID)
 	}
-	
+
 	// Extract PR/Issue numbers and additional user IDs based on event type
 	switch event.Event {
 	case "pull_request", "pull_request_review", "pull_request_review_comment":
@@ -125,7 +124,7 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 			if number, ok := pr["number"].(float64); ok {
 				entities.PRNumber = int(number)
 			}
-			
+
 			// Extract PR author
 			if user, ok := pr["user"].(map[string]interface{}); ok {
 				if id, ok := user["id"]; ok {
@@ -135,7 +134,7 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 					}
 				}
 			}
-			
+
 			// Extract assignees
 			if assignees, ok := pr["assignees"].([]interface{}); ok {
 				for _, assignee := range assignees {
@@ -149,7 +148,7 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 					}
 				}
 			}
-			
+
 			// Extract requested reviewers
 			if reviewers, ok := pr["requested_reviewers"].([]interface{}); ok {
 				for _, reviewer := range reviewers {
@@ -164,14 +163,14 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 				}
 			}
 		}
-		
+
 	case "issues", "issue_comment":
 		if issue, ok := payload["issue"].(map[string]interface{}); ok {
 			// Extract issue number
 			if number, ok := issue["number"].(float64); ok {
 				entities.IssueNumber = int(number)
 			}
-			
+
 			// Extract issue author
 			if user, ok := issue["user"].(map[string]interface{}); ok {
 				if id, ok := user["id"]; ok {
@@ -181,7 +180,7 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 					}
 				}
 			}
-			
+
 			// Extract assignees
 			if assignees, ok := issue["assignees"].([]interface{}); ok {
 				for _, assignee := range assignees {
@@ -196,11 +195,11 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 				}
 			}
 		}
-		
+
 	case "push", "create", "delete":
 		// For push events, the pusher is already captured as sender
 		// These events typically don't have other users involved
-		
+
 	case "team_add", "team":
 		// Extract team members if available
 		if team, ok := payload["team"].(map[string]interface{}); ok {
@@ -218,7 +217,7 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 			}
 		}
 	}
-	
+
 	// Extract comment author for comment events
 	if comment, ok := payload["comment"].(map[string]interface{}); ok {
 		if user, ok := comment["user"].(map[string]interface{}); ok {
@@ -230,7 +229,7 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 			}
 		}
 	}
-	
+
 	// Extract review author for review events
 	if review, ok := payload["review"].(map[string]interface{}); ok {
 		if user, ok := review["user"].(map[string]interface{}); ok {
@@ -242,7 +241,7 @@ func ExtractEventEntities(event *GitHubEvent) (*EventEntities, error) {
 			}
 		}
 	}
-	
+
 	return entities, nil
 }
 

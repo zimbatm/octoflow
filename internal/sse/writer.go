@@ -18,13 +18,13 @@ func NewWriter(w http.ResponseWriter) (*Writer, error) {
 	if !ok {
 		return nil, fmt.Errorf("response writer does not support flushing")
 	}
-	
+
 	// Set SSE headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // Disable Nginx buffering
-	
+
 	return &Writer{
 		w:       w,
 		flusher: flusher,
@@ -39,14 +39,14 @@ func (w *Writer) WriteEvent(id, eventType string, data []byte) error {
 			return err
 		}
 	}
-	
+
 	// Write event type if provided
 	if eventType != "" {
 		if _, err := fmt.Fprintf(w.w, "event: %s\n", eventType); err != nil {
 			return err
 		}
 	}
-	
+
 	// Write data field(s) - handle multi-line data
 	lines := strings.Split(string(data), "\n")
 	for _, line := range lines {
@@ -54,15 +54,15 @@ func (w *Writer) WriteEvent(id, eventType string, data []byte) error {
 			return err
 		}
 	}
-	
+
 	// End of event
 	if _, err := fmt.Fprintln(w.w); err != nil {
 		return err
 	}
-	
+
 	// Flush to client
 	w.flusher.Flush()
-	
+
 	return nil
 }
 

@@ -34,7 +34,7 @@ type GitHubEvent struct {
 	// Processing metadata
 	ProcessingVersion int `json:"processing_version" parquet:"name=processing_version, type=INT32"`
 	Retries           int `json:"retries" parquet:"name=retries, type=INT32"`
-	
+
 	// Metadata for SSE streaming context
 	Metadata map[string]string `json:"metadata,omitempty"` // Additional metadata for SSE clients
 }
@@ -107,8 +107,7 @@ type EventEntities struct {
 	OrganizationID string   `json:"organization_id,omitempty"`
 	RepositoryID   string   `json:"repository_id,omitempty"`
 	SenderID       string   `json:"sender_id,omitempty"`
-	UserIDs        []string `json:"user_ids,omitempty"`      // All users involved (sender, assignees, reviewers, etc.)
-	PRNumber       int      `json:"pr_number,omitempty"`      // Pull request number if applicable
-	IssueNumber    int      `json:"issue_number,omitempty"`   // Issue number if applicable
+	UserIDs        []string `json:"user_ids,omitempty"`     // All users involved (sender, assignees, reviewers, etc.)
+	PRNumber       int      `json:"pr_number,omitempty"`    // Pull request number if applicable
+	IssueNumber    int      `json:"issue_number,omitempty"` // Issue number if applicable
 }
-

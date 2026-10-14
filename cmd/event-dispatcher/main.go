@@ -187,7 +187,7 @@ func processAndDispatch(msg *nats.Msg, cfg *config.Config, publisher *natsIntern
 	// Extract entities from the event
 	entities, err := events.ExtractEventEntities(&event)
 	if err != nil {
-		slog.Warn("Failed to extract entities from event", 
+		slog.Warn("Failed to extract entities from event",
 			"event_id", event.ID,
 			"event_type", event.Event,
 			"error", err)

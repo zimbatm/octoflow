@@ -108,14 +108,14 @@ func createRouter(sseHandler *sse.Handler, cfg *config.Config) *mux.Router {
 		if r.Method == "OPTIONS" {
 			return
 		}
-		
+
 		stats := sseHandler.GetStats()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(stats)
 	})
 
 	// SSE endpoints
-	
+
 	// All events (firehose)
 	router.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
 		handleSSE(w, r, sseHandler, "all", cfg.NATS.SubjectPrefix+".>")
@@ -203,7 +203,7 @@ func setCORSHeaders(w http.ResponseWriter) {
 func handleSSE(w http.ResponseWriter, r *http.Request, handler *sse.Handler, streamID, natsSubject string) {
 	// Set CORS headers
 	setCORSHeaders(w)
-	
+
 	// Handle OPTIONS
 	if r.Method == "OPTIONS" {
 		return
@@ -220,21 +220,21 @@ func handleSSE(w http.ResponseWriter, r *http.Request, handler *sse.Handler, str
 func createFilterFromQuery(r *http.Request) *events.EventFilter {
 	eventTypes := r.URL.Query().Get("type")
 	actions := r.URL.Query().Get("action")
-	
+
 	if eventTypes == "" && actions == "" {
 		return nil
 	}
-	
+
 	filter := &events.EventFilter{}
-	
+
 	if eventTypes != "" {
 		filter.Events = strings.Split(eventTypes, ",")
 	}
-	
+
 	if actions != "" {
 		filter.Actions = strings.Split(actions, ",")
 	}
-	
+
 	return filter
 }
 

@@ -42,7 +42,7 @@ func main() {
 
 	// Subscribe to all PR events for the repository
 	subject := fmt.Sprintf("github.events.pr.%s.>", repoID)
-	sub, err := js.Subscribe(subject, handlePREvent, 
+	sub, err := js.Subscribe(subject, handlePREvent,
 		nats.Durable("pr-monitor"),
 		nats.DeliverNew(),
 	)
@@ -84,21 +84,21 @@ func handlePREvent(msg *nats.Msg) {
 	case "pull_request":
 		switch event.Action {
 		case "opened":
-			fmt.Printf("✨ PR #%d opened: %s by @%s\n", 
+			fmt.Printf("✨ PR #%d opened: %s by @%s\n",
 				pr.Number, pr.Title, pr.User.Login)
 		case "closed":
 			if pr.Merged {
-				fmt.Printf("🎉 PR #%d merged: %s\n", 
+				fmt.Printf("🎉 PR #%d merged: %s\n",
 					pr.Number, pr.Title)
 			} else {
-				fmt.Printf("❌ PR #%d closed without merge: %s\n", 
+				fmt.Printf("❌ PR #%d closed without merge: %s\n",
 					pr.Number, pr.Title)
 			}
 		case "reopened":
-			fmt.Printf("♻️  PR #%d reopened: %s\n", 
+			fmt.Printf("♻️  PR #%d reopened: %s\n",
 				pr.Number, pr.Title)
 		case "synchronize":
-			fmt.Printf("🔄 PR #%d updated: %s\n", 
+			fmt.Printf("🔄 PR #%d updated: %s\n",
 				pr.Number, pr.Title)
 		}
 
@@ -107,25 +107,25 @@ func handlePREvent(msg *nats.Msg) {
 		if review != nil {
 			switch review.State {
 			case "approved":
-				fmt.Printf("✅ PR #%d approved by @%s\n", 
+				fmt.Printf("✅ PR #%d approved by @%s\n",
 					pr.Number, review.User.Login)
 			case "changes_requested":
-				fmt.Printf("🔧 PR #%d changes requested by @%s\n", 
+				fmt.Printf("🔧 PR #%d changes requested by @%s\n",
 					pr.Number, review.User.Login)
 			case "commented":
-				fmt.Printf("💬 PR #%d reviewed by @%s\n", 
+				fmt.Printf("💬 PR #%d reviewed by @%s\n",
 					pr.Number, review.User.Login)
 			}
 		}
 
 	case "pull_request_review_comment":
-		fmt.Printf("💭 PR #%d comment by @%s\n", 
+		fmt.Printf("💭 PR #%d comment by @%s\n",
 			pr.Number, event.Sender.Login)
 
 	case "issue_comment":
 		// This also fires for PR comments
 		if pr.Number > 0 {
-			fmt.Printf("💬 PR #%d comment by @%s\n", 
+			fmt.Printf("💬 PR #%d comment by @%s\n",
 				pr.Number, event.Sender.Login)
 		}
 	}

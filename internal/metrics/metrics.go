@@ -98,7 +98,6 @@ var (
 		Name: "octoflow_event_processing_errors_total",
 		Help: "Total number of event processing errors",
 	}, []string{"component", "error_type"})
-
 )
 
 // RecordWebhookRequest records webhook request metrics
