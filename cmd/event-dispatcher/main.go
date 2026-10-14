@@ -56,46 +56,14 @@ func main() {
 
 	// Create durable consumer
 	consumerName := "event-dispatcher"
-	subject := cfg.NATS.SubjectPrefix + ".>"
-
-	// Wait for stream to exist and create consumer
-	var consumerInfo *nats.ConsumerInfo
-	for attempts := 0; attempts < 30; attempts++ {
-		// Check if consumer exists
-		consumerInfo, err = js.ConsumerInfo(cfg.NATS.StreamName, consumerName)
-		if err == nil {
-			slog.Info("Using existing consumer",
-				"consumer", consumerName,
-				"pending", consumerInfo.NumPending)
-			break
-		}
-
-		// Try to create consumer
-		consumerInfo, err = js.AddConsumer(cfg.NATS.StreamName, &nats.ConsumerConfig{
-			Durable:       consumerName,
-			DeliverPolicy: nats.DeliverAllPolicy,
-			AckPolicy:     nats.AckExplicitPolicy,
-			FilterSubject: subject,
-			MaxAckPending: 1000,
-		})
-		if err == nil {
-			slog.Info("Created consumer", "consumer", consumerName)
-			break
-		}
-
-		// If stream doesn't exist, wait and retry
-		if err.Error() == "nats: stream not found" {
-			slog.Info("Waiting for stream to be created", "stream", cfg.NATS.StreamName)
-			time.Sleep(2 * time.Second)
-			continue
-		}
-
-		// Other error, fail
+	if err := natsInternal.EnsureConsumer(js, cfg.NATS.StreamName, &nats.ConsumerConfig{
+		Durable:        consumerName,
+		DeliverPolicy:  nats.DeliverAllPolicy,
+		AckPolicy:      nats.AckExplicitPolicy,
+		FilterSubjects: natsInternal.PrimarySubjects(cfg.NATS.SubjectPrefix),
+		MaxAckPending:  1000,
+	}); err != nil {
 		log.Fatalf("Failed to create consumer: %v", err)
-	}
-
-	if consumerInfo == nil {
-		log.Fatalf("Failed to create consumer after 30 attempts")
 	}
 
 	// Context for graceful shutdown
@@ -140,7 +108,7 @@ func subscribeAndDispatch(ctx context.Context, js nats.JetStreamContext, cfg *co
 	publisher *natsInternal.Publisher, consumerName string, workerID int) {
 
 	// Create subscription
-	sub, err := js.PullSubscribe(cfg.NATS.SubjectPrefix+".>", consumerName)
+	sub, err := js.PullSubscribe("", consumerName, nats.Bind(cfg.NATS.StreamName, consumerName))
 	if err != nil {
 		slog.Error("Failed to create subscription", "worker_id", workerID, "error", err)
 		return
@@ -198,21 +166,20 @@ func processAndDispatch(msg *nats.Msg, cfg *config.Config, publisher *natsIntern
 	// Build subjects to publish to
 	subjects := buildDispatchSubjects(cfg.NATS.SubjectPrefix, &event, entities)
 
-	// Publish to each subject
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	for _, subject := range subjects {
-		err := publisher.PublishToSubject(context.Background(), subject, msg.Data, event.ID)
-		if err != nil {
-			slog.Error("Failed to publish to subject",
-				"subject", subject,
-				"event_id", event.ID,
-				"error", err)
-			// Continue with other subjects even if one fails
-		} else {
-			slog.Debug("Dispatched event",
-				"subject", subject,
-				"event_id", event.ID,
-				"event_type", event.Event)
+		// the stream deduplicates by message id across all subjects, so reusing
+		// event.ID here would drop every fan-out copy as a duplicate of the original.
+		msgID := event.ID + "@" + subject
+		if err := publisher.PublishToSubject(ctx, subject, msg.Data, msgID); err != nil {
+			return fmt.Errorf("publish to %s: %w", subject, err)
 		}
+		slog.Debug("Dispatched event",
+			"subject", subject,
+			"event_id", event.ID,
+			"event_type", event.Event)
 	}
 
 	slog.Info("Dispatched event to entity subjects",
