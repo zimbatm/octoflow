@@ -1,15 +1,17 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
-	"github.com/xitongsys/parquet-go-source/local"
+	"github.com/xitongsys/parquet-go-source/buffer"
 	"github.com/xitongsys/parquet-go/parquet"
 	"github.com/xitongsys/parquet-go/writer"
 	"github.com/zimbatm/octoflow/internal/config"
@@ -17,42 +19,79 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// S3Writer writes events to S3 in Parquet format
+// parquetRow is the on-disk schema. parquet-go cannot encode time.Time,
+// json.RawMessage or maps, so GitHubEvent is not used directly.
+type parquetRow struct {
+	ID                string `parquet:"name=id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Event             string `parquet:"name=event, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Signature         string `parquet:"name=signature, type=BYTE_ARRAY, convertedtype=UTF8"`
+	HookID            string `parquet:"name=hook_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	HookInstallation  string `parquet:"name=hook_installation, type=BYTE_ARRAY, convertedtype=UTF8"`
+	ReceivedAt        int64  `parquet:"name=received_at, type=INT64, convertedtype=TIMESTAMP_MILLIS"`
+	Payload           string `parquet:"name=payload, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Repository        string `parquet:"name=repository, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Organization      string `parquet:"name=organization, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Sender            string `parquet:"name=sender, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Action            string `parquet:"name=action, type=BYTE_ARRAY, convertedtype=UTF8"`
+	OrganizationID    string `parquet:"name=organization_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	RepositoryID      string `parquet:"name=repository_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	SenderID          string `parquet:"name=sender_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	ProcessingVersion int32  `parquet:"name=processing_version, type=INT32"`
+	Retries           int32  `parquet:"name=retries, type=INT32"`
+}
+
+func toRow(e *events.GitHubEvent) parquetRow {
+	return parquetRow{
+		ID:                e.ID,
+		Event:             e.Event,
+		Signature:         e.Signature,
+		HookID:            e.HookID,
+		HookInstallation:  e.HookInstallation,
+		ReceivedAt:        e.ReceivedAt.UnixMilli(),
+		Payload:           string(e.Payload),
+		Repository:        e.Repository,
+		Organization:      e.Organization,
+		Sender:            e.Sender,
+		Action:            e.Action,
+		OrganizationID:    e.OrganizationID,
+		RepositoryID:      e.RepositoryID,
+		SenderID:          e.SenderID,
+		ProcessingVersion: int32(e.ProcessingVersion),
+		Retries:           int32(e.Retries),
+	}
+}
+
+// Done is called once per event, after its batch is uploaded (nil) or
+// dropped (the upload error). The caller acks or naks the source message there.
+type Done func(error)
+
+// S3Writer writes events to S3 in Parquet format. It is safe for concurrent use.
 type S3Writer struct {
 	config      *config.S3Config
 	minioClient *minio.Client
-	batch       []*events.GitHubEvent
-	batchSize   int64
-	lastFlush   time.Time
+
+	mu        sync.Mutex
+	batch     []*events.GitHubEvent
+	done      []Done
+	batchSize int64
+	lastFlush time.Time
 }
 
 // NewS3Writer creates a new S3 writer
 func NewS3Writer(cfg *config.S3Config) (*S3Writer, error) {
-	// Determine endpoint
 	endpoint := cfg.Endpoint
 	if endpoint == "" {
-		// Default to AWS S3 endpoint for the region
 		endpoint = fmt.Sprintf("s3.%s.amazonaws.com", cfg.Region)
 	}
 
-	// Determine if using SSL
-	useSSL := true
-	if len(endpoint) > 7 && endpoint[:7] == "http://" {
-		useSSL = false
-		endpoint = endpoint[7:]
-	} else if len(endpoint) > 8 && endpoint[:8] == "https://" {
-		endpoint = endpoint[8:]
-	}
+	useSSL := !strings.HasPrefix(endpoint, "http://")
+	endpoint = strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
 
-	// Create MinIO client options
-	opts := &minio.Options{
+	minioClient, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, cfg.SessionToken),
 		Secure: useSSL,
 		Region: cfg.Region,
-	}
-
-	// Create MinIO client
-	minioClient, err := minio.New(endpoint, opts)
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create MinIO client: %w", err)
 	}
@@ -65,28 +104,45 @@ func NewS3Writer(cfg *config.S3Config) (*S3Writer, error) {
 	}, nil
 }
 
-// AddEvent adds an event to the batch
-func (w *S3Writer) AddEvent(event *events.GitHubEvent) error {
+// AddEvent adds an event to the batch and flushes when the batch is full.
+func (w *S3Writer) AddEvent(event *events.GitHubEvent, done Done) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
 	w.batch = append(w.batch, event)
+	w.done = append(w.done, done)
 	w.batchSize += int64(len(event.Payload))
 
-	// Check if we should flush
 	if w.shouldFlush() {
-		return w.Flush()
+		w.flushLocked()
 	}
-
-	return nil
 }
 
-// shouldFlush determines if the batch should be flushed
 func (w *S3Writer) shouldFlush() bool {
 	return len(w.batch) >= w.config.BatchSize ||
 		w.batchSize >= w.config.BatchMaxBytes ||
 		time.Since(w.lastFlush) >= w.config.BatchTimeout
 }
 
-// Flush writes the current batch to S3
+// FlushIfDue flushes when the batch timeout has passed.
+func (w *S3Writer) FlushIfDue() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.batch) > 0 && time.Since(w.lastFlush) >= w.config.BatchTimeout {
+		w.flushLocked()
+	}
+}
+
+// Flush writes the current batch to S3.
 func (w *S3Writer) Flush() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.flushLocked()
+}
+
+// flushLocked always empties the batch: on failure the callers nak, and
+// JetStream redelivers into a later batch.
+func (w *S3Writer) flushLocked() error {
 	if len(w.batch) == 0 {
 		return nil
 	}
@@ -96,72 +152,54 @@ func (w *S3Writer) Flush() error {
 	batchSize := w.batchSize
 	status := "success"
 
-	defer func() {
-		// Record metrics
-		metrics.RecordS3Write(status, eventCount, batchSize, time.Since(start).Seconds())
-	}()
-
-	// Generate S3 key based on current time
-	key := w.generateS3Key()
-
-	// Write to temporary file first
-	tempFile := fmt.Sprintf("/tmp/octoflow_%d.parquet", time.Now().UnixNano())
-	if err := w.writeParquetFile(tempFile, w.batch); err != nil {
-		status = "write_error"
-		return fmt.Errorf("failed to write parquet file: %w", err)
-	}
-
-	// Get file size for metrics
-	if info, err := os.Stat(tempFile); err == nil {
-		batchSize = info.Size()
-	}
-
-	// Upload to S3
-	if err := w.uploadToS3(tempFile, key); err != nil {
+	err := w.upload()
+	if err != nil {
 		status = "upload_error"
+		slog.Error("Failed to write batch to S3", "event_count", eventCount, "error", err)
+	}
+	metrics.RecordS3Write(status, eventCount, batchSize, time.Since(start).Seconds())
+
+	for _, done := range w.done {
+		done(err)
+	}
+	w.batch = w.batch[:0]
+	w.done = w.done[:0]
+	w.batchSize = 0
+	w.lastFlush = time.Now()
+	return err
+}
+
+func (w *S3Writer) upload() error {
+	data, err := w.encodeParquet(w.batch)
+	if err != nil {
+		return fmt.Errorf("failed to encode parquet: %w", err)
+	}
+
+	key := w.generateS3Key()
+	_, err = w.minioClient.PutObject(context.Background(), w.config.Bucket, key,
+		bytes.NewReader(data), int64(len(data)),
+		minio.PutObjectOptions{ContentType: "application/vnd.apache.parquet"})
+	if err != nil {
 		return fmt.Errorf("failed to upload to S3: %w", err)
 	}
 
 	slog.Info("Uploaded batch to S3",
 		"event_count", len(w.batch),
 		"bucket", w.config.Bucket,
-		"key", key)
-
-	// Reset batch
-	w.batch = w.batch[:0]
-	w.batchSize = 0
-	w.lastFlush = time.Now()
-
+		"key", key,
+		"bytes", len(data))
 	return nil
 }
 
-// writeParquetFile writes events to a Parquet file
-func (w *S3Writer) writeParquetFile(filename string, eventList []*events.GitHubEvent) error {
-	fw, err := local.NewLocalFileWriter(filename)
+func (w *S3Writer) encodeParquet(eventList []*events.GitHubEvent) ([]byte, error) {
+	fw := buffer.NewBufferFile()
+
+	pw, err := writer.NewParquetWriter(fw, new(parquetRow), 4)
 	if err != nil {
-		return fmt.Errorf("failed to create file writer: %w", err)
-	}
-	defer fw.Close()
-
-	// Create Parquet writer - use the first event for schema if available
-	var schemaObj interface{}
-	if len(eventList) > 0 {
-		schemaObj = eventList[0]
-	} else {
-		// Create empty event for schema
-		schemaObj = &events.GitHubEvent{}
+		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
 
-	pw, err := writer.NewParquetWriter(fw, schemaObj, 4)
-	if err != nil {
-		return fmt.Errorf("failed to create parquet writer: %w", err)
-	}
-	defer pw.WriteStop()
-
-	// Set compression
 	switch w.config.CompressionType {
-	case "snappy":
-		pw.CompressionType = parquet.CompressionCodec_SNAPPY
 	case "gzip":
 		pw.CompressionType = parquet.CompressionCodec_GZIP
 	case "lz4":
@@ -169,78 +207,24 @@ func (w *S3Writer) writeParquetFile(filename string, eventList []*events.GitHubE
 	default:
 		pw.CompressionType = parquet.CompressionCodec_SNAPPY
 	}
-
-	// Set row group size
 	pw.RowGroupSize = int64(w.config.RowGroupSize)
 
-	// Write events
 	for _, event := range eventList {
-		if err := pw.Write(event); err != nil {
-			return fmt.Errorf("failed to write event: %w", err)
+		if err := pw.Write(toRow(event)); err != nil {
+			return nil, fmt.Errorf("failed to write event %s: %w", event.ID, err)
 		}
 	}
-
-	return nil
+	if err := pw.WriteStop(); err != nil {
+		return nil, fmt.Errorf("failed to finish parquet file: %w", err)
+	}
+	return fw.Bytes(), nil
 }
 
-// uploadToS3 uploads a file to S3
-func (w *S3Writer) uploadToS3(filename, key string) error {
-	// Open the file
-	file, err := os.Open(filename)
-	if err != nil {
-		return fmt.Errorf("failed to open file: %w", err)
-	}
-	defer file.Close()
-
-	// Get file info
-	fileStat, err := file.Stat()
-	if err != nil {
-		return fmt.Errorf("failed to get file info: %w", err)
-	}
-
-	// Upload options
-	opts := minio.PutObjectOptions{
-		ContentType: "application/octet-stream",
-	}
-
-	// Upload to S3
-	_, err = w.minioClient.PutObject(
-		context.Background(),
-		w.config.Bucket,
-		key,
-		file,
-		fileStat.Size(),
-		opts,
-	)
-
-	if err != nil {
-		return fmt.Errorf("failed to upload to S3: %w", err)
-	}
-
-	// Clean up temp file
-	os.Remove(filename)
-
-	return nil
-}
-
-// generateS3Key generates an S3 key based on current time
+// generateS3Key returns prefix/YYYY/MM/DD/<unix nanos>.parquet
 func (w *S3Writer) generateS3Key() string {
 	now := time.Now().UTC()
-
-	// Format: prefix/year/month/day/timestamp_batchid.parquet
-	return fmt.Sprintf("%s/%04d/%02d/%02d/%d_%s.parquet",
-		w.config.KeyPrefix,
-		now.Year(),
-		now.Month(),
-		now.Day(),
-		now.UnixNano(),
-		generateBatchID(),
-	)
-}
-
-// generateBatchID generates a unique batch ID
-func generateBatchID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	return fmt.Sprintf("%s/%04d/%02d/%02d/%d.parquet",
+		w.config.KeyPrefix, now.Year(), now.Month(), now.Day(), now.UnixNano())
 }
 
 // Close flushes any remaining events

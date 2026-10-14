@@ -8,7 +8,7 @@ webhook: ./scripts/wait-for.sh 4222 go run ./cmd/webhook-receiver
 dispatcher: ./scripts/wait-for.sh 4222 go run ./cmd/event-dispatcher
 
 # Wait for NATS to be ready, then start S3 worker
-# s3-worker: ./scripts/wait-for.sh 4222 go run ./cmd/s3-worker  # Disabled - needs Parquet schema fixes
+s3-worker: ./scripts/wait-for.sh 4222 go run ./cmd/s3-worker
 
 # Wait for NATS to be ready, then start SSE server
 sse: ./scripts/wait-for.sh 4222 go run ./cmd/sse-server

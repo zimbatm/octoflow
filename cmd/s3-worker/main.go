@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -61,46 +60,16 @@ func main() {
 
 	// Create durable consumer
 	consumerName := "s3-worker"
-	subject := cfg.NATS.SubjectPrefix + ".>"
-
-	// Wait for stream to exist and create consumer
-	var consumerInfo *nats.ConsumerInfo
-	for attempts := 0; attempts < 30; attempts++ {
-		// Check if consumer exists
-		consumerInfo, err = js.ConsumerInfo(cfg.NATS.StreamName, consumerName)
-		if err == nil {
-			slog.Info("Using existing consumer",
-				"consumer", consumerName,
-				"pending", consumerInfo.NumPending)
-			break
-		}
-
-		// Try to create consumer
-		consumerInfo, err = js.AddConsumer(cfg.NATS.StreamName, &nats.ConsumerConfig{
-			Durable:       consumerName,
-			DeliverPolicy: nats.DeliverAllPolicy,
-			AckPolicy:     nats.AckExplicitPolicy,
-			FilterSubject: subject,
-			MaxAckPending: 1000,
-		})
-		if err == nil {
-			slog.Info("Created consumer", "consumer", consumerName)
-			break
-		}
-
-		// If stream doesn't exist, wait and retry
-		if err.Error() == "nats: stream not found" {
-			slog.Info("Waiting for stream to be created", "stream", cfg.NATS.StreamName)
-			time.Sleep(2 * time.Second)
-			continue
-		}
-
-		// Other error, fail
+	if err := natsInternal.EnsureConsumer(js, cfg.NATS.StreamName, &nats.ConsumerConfig{
+		Durable:        consumerName,
+		DeliverPolicy:  nats.DeliverAllPolicy,
+		AckPolicy:      nats.AckExplicitPolicy,
+		FilterSubjects: natsInternal.PrimarySubjects(cfg.NATS.SubjectPrefix),
+		// messages stay unacked until their batch is uploaded.
+		AckWait:       cfg.S3.BatchTimeout + 2*time.Minute,
+		MaxAckPending: 2 * cfg.S3.BatchSize,
+	}); err != nil {
 		log.Fatalf("Failed to create consumer: %v", err)
-	}
-
-	if consumerInfo == nil {
-		log.Fatalf("Failed to create consumer after 30 attempts")
 	}
 
 	// Context for graceful shutdown
@@ -131,9 +100,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := s3Writer.Flush(); err != nil {
-					slog.Error("Error flushing batch", "error", err)
-				}
+				s3Writer.FlushIfDue()
 			}
 		}
 	}()
@@ -170,7 +137,7 @@ func subscribeAndProcess(ctx context.Context, js nats.JetStreamContext, cfg *con
 
 	// Create subscription - for pull consumers, we can use any subject or wildcard
 	// The consumer already has the filter configured
-	sub, err := js.PullSubscribe(cfg.NATS.SubjectPrefix+".>", consumerName)
+	sub, err := js.PullSubscribe("", consumerName, nats.Bind(cfg.NATS.StreamName, consumerName))
 	if err != nil {
 		slog.Error("Failed to create subscription", "worker_id", workerID, "error", err)
 		return
@@ -194,40 +161,31 @@ func subscribeAndProcess(ctx context.Context, js nats.JetStreamContext, cfg *con
 			}
 
 			for _, msg := range msgs {
-				// Process message
-				if err := processMessage(msg, cfg, s3Writer); err != nil {
-					slog.Error("Error processing message",
-						"worker_id", workerID,
-						"error", err)
-					// NAK the message for retry
-					msg.Nak()
-				} else {
-					// ACK the message
-					msg.Ack()
-				}
+				processMessage(msg, cfg, s3Writer)
 			}
 		}
 	}
 }
 
-// processMessage processes a single NATS message
-func processMessage(msg *nats.Msg, cfg *config.Config, s3Writer *storage.S3Writer) error {
-	// Decode event
+// processMessage leaves the ack to the S3 writer, which acks after upload.
+func processMessage(msg *nats.Msg, cfg *config.Config, s3Writer *storage.S3Writer) {
 	var event events.GitHubEvent
 	if err := json.Unmarshal(msg.Data, &event); err != nil {
-		return fmt.Errorf("failed to unmarshal event: %w", err)
+		slog.Error("Dropping undecodable message", "subject", msg.Subject, "error", err)
+		msg.Term()
+		return
 	}
 
-	// Apply S3 filter if configured
 	if cfg.Processing.S3Filter != nil && !cfg.Processing.S3Filter.Matches(&event) {
-		// Skip this event
-		return nil
+		msg.Ack()
+		return
 	}
 
-	// Add to S3 writer
-	if err := s3Writer.AddEvent(&event); err != nil {
-		return fmt.Errorf("failed to add event to batch: %w", err)
-	}
-
-	return nil
+	s3Writer.AddEvent(&event, func(err error) {
+		if err != nil {
+			msg.Nak()
+		} else {
+			msg.Ack()
+		}
+	})
 }
