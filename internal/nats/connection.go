@@ -2,6 +2,7 @@ package nats
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/nats-io/nats.go"
@@ -16,13 +17,13 @@ func Connect(cfg *config.NATSConfig) (*nats.Conn, error) {
 		nats.ReconnectWait(cfg.ReconnectWait),
 		nats.Timeout(cfg.ConnectionTimeout),
 		nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-			fmt.Printf("NATS disconnected: %v\n", err)
+			slog.Warn("NATS disconnected", "error", err)
 		}),
 		nats.ReconnectHandler(func(nc *nats.Conn) {
-			fmt.Printf("NATS reconnected to %s\n", nc.ConnectedUrl())
+			slog.Info("NATS reconnected", "url", nc.ConnectedUrl())
 		}),
 		nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
-			fmt.Printf("NATS error: %v\n", err)
+			slog.Error("NATS error", "error", err)
 		}),
 	}
 
