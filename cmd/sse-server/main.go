@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -100,7 +101,7 @@ func createRouter(sseHandler *sse.Handler, cfg *config.Config) *mux.Router {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"healthy","service":"sse-server"}`)
+		_, _ = io.WriteString(w, `{"status":"healthy","service":"sse-server"}`)
 	})
 
 	// Stats endpoint

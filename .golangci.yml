@@ -1,0 +1,8 @@
+version: "2"
+linters:
+  settings:
+    errcheck:
+      # closing a reader cannot lose data
+      exclude-functions:
+        - (io.ReadCloser).Close
+        - (*compress/gzip.Reader).Close
