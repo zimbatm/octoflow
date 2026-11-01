@@ -60,6 +60,7 @@ bucket first.
 | `scripts/test-webhook.sh` | posts a signed sample `pull_request` delivery (repo 111, org 222, PR 7) to `WEBHOOK_URL` (default `http://localhost:8080/webhook`); needs `WEBHOOK_SECRET` |
 | `scripts/test-sse.sh` | reads `/events`, `/stats` and a filtered route from the local SSE server |
 | `scripts/test-system.sh` | starts hivemind and checks the health endpoints |
+| `scripts/load.sh [deliveries] [parallel]` | local throughput: its own nats-server and `octoflow all`, N deliveries, time until the dispatcher caught up; see [Capacity](../explanation/architecture.md#capacity) |
 | `scripts/create-bucket.sh` | creates `$S3_BUCKET` on the local rustfs with `curl --aws-sigv4` |
 | `scripts/clear-streams.sh` | deletes every NATS stream after a confirmation |
 | `scripts/wait-for.sh PORT CMD...` | runs `CMD` once `PORT` accepts connections |

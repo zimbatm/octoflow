@@ -97,3 +97,23 @@ service so that each can be restarted and watched on its own.
 It does not transform or enrich events, does not proxy the GitHub API,
 and does not serve as a store of record beyond the Parquet archive.
 Consumers that need more than the payload call GitHub themselves.
+
+## Capacity
+
+Measured on 2026-11-01 on a laptop, `octoflow all` and nats-server on
+the same machine, 3000 `pull_request` deliveries of 314 bytes sent by
+16 parallel curl processes, no S3:
+
+| | |
+|---|---|
+| Receiver | 1370 deliveries/s, 0.5 ms per request on average |
+| Publish to JetStream | 0.4 ms on average, 21000 publishes |
+| Dispatcher | caught up within 10 ms of the last delivery |
+| Stream growth | 7 messages and 4.8 KB per event: the primary, a repo copy, four user copies, a pr copy |
+
+The curl processes were the bottleneck, not the services. For scale:
+the GitHub Events API of a busy repository yields a few events per
+second. A delivery of 25 MB takes about 60 ms end to end.
+
+The numbers come from `scripts/load.sh`; rerun it after a change to the
+hot path.
