@@ -18,6 +18,3 @@ sse: ./scripts/wait-for.sh 4222 go run ./cmd/sse-server
 
 # Start the dashboard web server
 dashboard: WEB_DIR=./web go run ./cmd/dashboard
-
-# SSH tunnels for exposing webhook to internet
-tunnel-cloudflare: cloudflared tunnel run --url http://localhost:8080 6429956a-91d2-40ce-a576-ba3974523d41

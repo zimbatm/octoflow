@@ -88,7 +88,7 @@ in
       environmentFile = lib.mkOption {
         type = lib.types.nullOr lib.types.path;
         default = null;
-        description = "systemd EnvironmentFile with WEBHOOK_SECRET=. Without a secret the receiver accepts unsigned deliveries.";
+        description = "systemd EnvironmentFile with WEBHOOK_SECRET=. The receiver refuses to start without one unless the file also sets WEBHOOK_ALLOW_UNSIGNED=true.";
       };
     };
 

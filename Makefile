@@ -1,90 +1,47 @@
-.PHONY: all build test clean fmt lint run-webhook run-s3-worker run-sse dev run-local run
+.PHONY: all build test test-coverage lint fmt run clean nats-server \
+	run-webhook run-dispatcher run-s3-worker run-sse run-dashboard run-public-ingest
 
-# Build variables
-GOBASE=$(shell pwd)
-GOBIN=$(GOBASE)/bin
-GOFILES=$(shell find . -name "*.go" -type f -not -path "./vendor/*")
-GOCMD=go
+SERVICES = webhook-receiver event-dispatcher s3-worker sse-server dashboard public-ingest
 
-# Build all services
 all: build
 
-build: webhook-receiver event-dispatcher s3-worker sse-server dashboard
+build:
+	for s in $(SERVICES); do go build -o bin/$$s ./cmd/$$s || exit 1; done
+	go build ./...
 
-webhook-receiver:
-	$(GOCMD) build -o $(GOBIN)/webhook-receiver ./cmd/webhook-receiver
-
-event-dispatcher:
-	$(GOCMD) build -o $(GOBIN)/event-dispatcher ./cmd/event-dispatcher
-
-s3-worker:
-	$(GOCMD) build -o $(GOBIN)/s3-worker ./cmd/s3-worker
-
-sse-server:
-	$(GOCMD) build -o $(GOBIN)/sse-server ./cmd/sse-server
-
-dashboard:
-	$(GOCMD) build -o $(GOBIN)/dashboard ./cmd/dashboard
-
-
-# Run services
-run-webhook:
-	$(GOCMD) run ./cmd/webhook-receiver
-
-run-dispatcher:
-	$(GOCMD) run ./cmd/event-dispatcher
-
-run-s3-worker:
-	$(GOCMD) run ./cmd/s3-worker
-
-run-sse:
-	$(GOCMD) run ./cmd/sse-server
-
-
-run-dashboard:
-	WEB_DIR=./web $(GOCMD) run ./cmd/dashboard
-
-
-# Development
-dev:
-	nix develop
-
-# Testing
 test:
-	$(GOCMD) test -v ./...
+	go test ./...
 
 test-coverage:
-	$(GOCMD) test -v -coverprofile=coverage.txt -covermode=atomic ./...
-
-# Formatting and linting
-fmt:
-	$(GOCMD) fmt ./...
-	$(GOCMD) mod tidy
+	go test -coverprofile=coverage.txt -covermode=atomic ./...
 
 lint:
 	golangci-lint run
 
-# Clean build artifacts
-clean:
-	$(GOCMD) clean
-	rm -rf $(GOBIN)
+fmt:
+	gofmt -w .
+	go mod tidy
 
-# Dependencies
-deps:
-	$(GOCMD) mod download
-	$(GOCMD) mod tidy
-
-# NATS local development
-nats-server:
-	nats-server -js
-
-# Generate mocks (if using mockgen)
-mocks:
-	$(GOCMD) generate ./...
-
-# Run all services locally with hivemind
+# all services under hivemind, see Procfile
 run:
 	./scripts/start-local.sh
 
-# Alias for backwards compatibility
-run-local: run
+nats-server:
+	nats-server -js
+
+run-webhook:
+	go run ./cmd/webhook-receiver
+run-dispatcher:
+	go run ./cmd/event-dispatcher
+run-s3-worker:
+	go run ./cmd/s3-worker
+run-sse:
+	go run ./cmd/sse-server
+run-dashboard:
+	WEB_DIR=./web go run ./cmd/dashboard
+run-public-ingest:
+	go run ./cmd/public-ingest
+
+clean:
+	go clean
+	rm -rf bin coverage.txt

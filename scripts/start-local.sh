@@ -17,11 +17,8 @@ if [ -z "${S3_BUCKET:-}" ]; then
     missing_vars+=("S3_BUCKET")
 fi
 
-# Warn if webhook secret is not set
-if [ -z "${WEBHOOK_SECRET:-}" ]; then
-    echo -e "${YELLOW}Warning: WEBHOOK_SECRET not set. Webhook signature validation is disabled.${NC}"
-    echo -e "${YELLOW}This is fine for development but NOT recommended for production.${NC}"
-    echo ""
+if [ -z "${WEBHOOK_SECRET:-}" ] && [ "${WEBHOOK_ALLOW_UNSIGNED:-}" != "true" ]; then
+    missing_vars+=("WEBHOOK_SECRET (or WEBHOOK_ALLOW_UNSIGNED=true)")
 fi
 
 # If using AWS S3 (not rustfs/LocalStack)
