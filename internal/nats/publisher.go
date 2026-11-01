@@ -12,166 +12,72 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// Publisher publishes events to NATS
+// streamLabel is the fixed value of the metrics' stream label.
+const streamLabel = "events"
+
+// Publisher publishes events to the JetStream stream.
 type Publisher struct {
 	config *config.NATSConfig
 	nc     *nats.Conn
 	js     nats.JetStreamContext
 }
 
-// NewPublisher creates a new NATS publisher
+// NewPublisher opens its own NATS connection.
 func NewPublisher(cfg *config.NATSConfig) (*Publisher, error) {
-	// Connect to NATS
 	nc, err := Connect(cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	publisher := &Publisher{
-		config: cfg,
-		nc:     nc,
+	js, err := nc.JetStream()
+	if err != nil {
+		nc.Close()
+		return nil, fmt.Errorf("failed to create JetStream context: %w", err)
 	}
-
-	// Set up JetStream if enabled
-	if cfg.JetStream {
-		js, err := nc.JetStream()
-		if err != nil {
-			nc.Close()
-			return nil, fmt.Errorf("failed to create JetStream context: %w", err)
-		}
-		publisher.js = js
-	}
-
-	return publisher, nil
+	return &Publisher{config: cfg, nc: nc, js: js}, nil
 }
 
-// PublishEvent publishes a GitHub event to NATS
+// PublishEvent publishes a GitHub event under its org or global subject,
+// with event.ID as the deduplication id.
 func (p *Publisher) PublishEvent(ctx context.Context, event *events.GitHubEvent) error {
-	start := time.Now()
-	streamName := "events"
-	status := "success"
-
-	defer func() {
-		// Record metrics
-		metrics.RecordNATSPublish(streamName, event.Event, status, time.Since(start).Seconds())
-
-	}()
-
-	// Serialize event to JSON
 	data, err := json.Marshal(event)
 	if err != nil {
-		status = "marshal_error"
+		metrics.RecordNATSPublish(streamLabel, event.Event, "marshal_error", 0)
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
-
-	// Build subject based on event type
-	subject := p.buildSubject(event)
-
-	// Publish with JetStream if enabled
-	if p.js != nil {
-		// Use event ID for deduplication
-		pubOpts := []nats.PubOpt{
-			nats.MsgId(event.ID),
-		}
-
-		// Publish with acknowledgment
-		ack, err := p.js.PublishAsync(subject, data, pubOpts...)
-		if err != nil {
-			status = "publish_error"
-			return fmt.Errorf("failed to publish to JetStream: %w", err)
-		}
-
-		// Wait for acknowledgment
-		select {
-		case <-ack.Ok():
-			return nil
-		case err := <-ack.Err():
-			status = "ack_error"
-			return fmt.Errorf("JetStream publish failed: %w", err)
-		case <-ctx.Done():
-			status = "timeout"
-			return ctx.Err()
-		}
-	} else {
-		// Regular NATS publish
-		if err := p.nc.Publish(subject, data); err != nil {
-			status = "publish_error"
-			return fmt.Errorf("failed to publish to NATS: %w", err)
-		}
-
-		// Flush to ensure delivery
-		if err := p.nc.FlushTimeout(5 * time.Second); err != nil {
-			status = "flush_error"
-			return fmt.Errorf("failed to flush NATS connection: %w", err)
-		}
-	}
-
-	return nil
+	return p.PublishToSubject(ctx, p.buildSubject(event), event.Event, data, event.ID)
 }
 
-// buildSubject constructs the NATS subject for an event
 func (p *Publisher) buildSubject(event *events.GitHubEvent) string {
-	// Use simplified pattern: org.{org_id}.{event_type}
-	// or global.{event_type} for non-org events
-
 	if event.OrganizationID != "" {
 		return fmt.Sprintf("%s.org.%s.%s", p.config.SubjectPrefix, event.OrganizationID, event.Event)
 	}
-
-	// For events without organization context (e.g., user events, global events)
 	return fmt.Sprintf("%s.global.%s", p.config.SubjectPrefix, event.Event)
 }
 
-// PublishToSubject publishes data to a specific subject. eventType only labels the metrics.
+// PublishToSubject publishes data and waits for the stream's ack. msgID is
+// the deduplication id; eventType only labels the metrics.
 func (p *Publisher) PublishToSubject(ctx context.Context, subject, eventType string, data []byte, msgID string) error {
 	start := time.Now()
-	streamName := "events"
 	status := "success"
-
 	defer func() {
-		// Record metrics
-		metrics.RecordNATSPublish(streamName, eventType, status, time.Since(start).Seconds())
+		metrics.RecordNATSPublish(streamLabel, eventType, status, time.Since(start).Seconds())
 	}()
 
-	if p.js != nil {
-		// Use JetStream with deduplication
-		pubOpts := []nats.PubOpt{
-			nats.MsgId(msgID),
-		}
-
-		// Publish with acknowledgment
-		ack, err := p.js.PublishAsync(subject, data, pubOpts...)
-		if err != nil {
-			status = "publish_error"
-			return fmt.Errorf("failed to publish to JetStream: %w", err)
-		}
-
-		// Wait for acknowledgment
-		select {
-		case <-ack.Ok():
-			return nil
-		case err := <-ack.Err():
-			status = "ack_error"
-			return fmt.Errorf("JetStream publish failed: %w", err)
-		case <-ctx.Done():
-			status = "timeout"
-			return ctx.Err()
-		}
-	}
-
-	// Regular NATS publish
-	if err := p.nc.Publish(subject, data); err != nil {
+	ack, err := p.js.PublishAsync(subject, data, nats.MsgId(msgID))
+	if err != nil {
 		status = "publish_error"
-		return fmt.Errorf("failed to publish to NATS: %w", err)
+		return fmt.Errorf("failed to publish to JetStream: %w", err)
 	}
-
-	// Flush to ensure delivery
-	if err := p.nc.FlushTimeout(5 * time.Second); err != nil {
-		status = "flush_error"
-		return fmt.Errorf("failed to flush NATS connection: %w", err)
+	select {
+	case <-ack.Ok():
+		return nil
+	case err := <-ack.Err():
+		status = "ack_error"
+		return fmt.Errorf("JetStream publish failed: %w", err)
+	case <-ctx.Done():
+		status = "timeout"
+		return ctx.Err()
 	}
-
-	return nil
 }
 
 // Close closes the NATS connection

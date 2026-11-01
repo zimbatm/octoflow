@@ -32,7 +32,6 @@ type WebhookConfig struct {
 type NATSConfig struct {
 	Servers       []string
 	SubjectPrefix string
-	JetStream     bool
 
 	StreamName     string
 	StreamReplicas int
@@ -92,7 +91,6 @@ func LoadFromEnv() (*Config, error) {
 		NATS: NATSConfig{
 			Servers:           []string{getEnvOrDefault("NATS_URL", "nats://localhost:4222")},
 			SubjectPrefix:     getEnvOrDefault("NATS_SUBJECT_PREFIX", "github.events"),
-			JetStream:         true,
 			StreamName:        getEnvOrDefault("NATS_STREAM_NAME", "GITHUB_EVENTS_RAW"),
 			StreamReplicas:    1,
 			StreamMaxAge:      7 * 24 * time.Hour,
