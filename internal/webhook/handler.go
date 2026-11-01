@@ -153,8 +153,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Info("Received ping event, acknowledging without processing",
 			"delivery_id", deliveryID,
 			"hook_id", hookID)
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, `{"status":"ok","message":"pong","delivery_id":"%s"}`, deliveryID)
+		writeJSON(w, http.StatusOK, fmt.Sprintf(`{"status":"ok","message":"pong","delivery_id":"%s"}`, deliveryID))
 		status = "success_ping"
 		return
 	}
@@ -176,8 +175,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ok","delivery_id":"%s"}`, deliveryID)
+	writeJSON(w, http.StatusOK, fmt.Sprintf(`{"status":"ok","delivery_id":"%s"}`, deliveryID))
 	status = "success"
 }
 

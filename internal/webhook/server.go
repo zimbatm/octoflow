@@ -2,7 +2,7 @@ package webhook
 
 import (
 	"context"
-	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -74,15 +74,11 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Only accept GET requests
 	if r.Method != http.MethodGet {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		fmt.Fprintf(w, `{"error":"Method not allowed. POST requests should go to /webhook","webhook_endpoint":"/webhook"}`)
+		writeJSON(w, http.StatusMethodNotAllowed, `{"error":"Method not allowed. POST requests should go to /webhook","webhook_endpoint":"/webhook"}`)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{
+	writeJSON(w, http.StatusOK, `{
   "service": "octoflow-webhook-receiver",
   "version": "1.0.0",
   "description": "GitHub webhook receiver for Octoflow event processing system",
@@ -104,7 +100,11 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 // healthHandler handles health check requests
 func healthHandler(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, `{"status":"healthy","service":"webhook-receiver"}`)
+}
+
+func writeJSON(w http.ResponseWriter, status int, body string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"healthy","service":"webhook-receiver"}`)
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, body)
 }
