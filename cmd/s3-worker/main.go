@@ -42,19 +42,12 @@ func main() {
 	}
 	defer nc.Close()
 
-	// Initialize NATS schema
-	schemaManager, err := natsInternal.NewSchemaManager(nc, &cfg.NATS)
-	if err != nil {
-		log.Fatalf("Failed to create schema manager: %v", err)
-	}
-	if err := schemaManager.InitializeSchema(); err != nil {
-		log.Fatalf("Failed to initialize NATS schema: %v", err)
-	}
-
-	// Create JetStream context
 	js, err := nc.JetStream()
 	if err != nil {
 		log.Fatalf("Failed to create JetStream context: %v", err)
+	}
+	if err := natsInternal.EnsureStream(js, &cfg.NATS); err != nil {
+		log.Fatalf("Failed to initialize NATS stream: %v", err)
 	}
 
 	// Create durable consumer

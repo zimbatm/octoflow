@@ -2,230 +2,72 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
+	"errors"
 	"log"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
-	"github.com/gorilla/mux"
 	"github.com/zimbatm/octoflow/internal/config"
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
 	"github.com/zimbatm/octoflow/internal/sse"
-	"github.com/zimbatm/octoflow/pkg/events"
 )
 
 func main() {
-	// Load configuration
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// Connect to NATS
 	nc, err := natsInternal.Connect(&cfg.NATS)
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer nc.Close()
-
-	// Initialize NATS schema
-	schemaManager, err := natsInternal.NewSchemaManager(nc, &cfg.NATS)
-	if err != nil {
-		log.Fatalf("Failed to create schema manager: %v", err)
-	}
-	if err := schemaManager.InitializeSchema(); err != nil {
-		log.Fatalf("Failed to initialize NATS schema: %v", err)
-	}
-
-	// Create JetStream context
 	js, err := nc.JetStream()
 	if err != nil {
 		log.Fatalf("Failed to create JetStream context: %v", err)
 	}
-
-	// Create SSE handler
-	sseHandler := sse.NewHandler(js, &cfg.NATS)
-
-	// Create router
-	router := createRouter(sseHandler, cfg)
-
-	// Start HTTP server
-	httpServer := &http.Server{
-		Addr:         cfg.SSE.ListenAddr,
-		Handler:      router,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 0, // No timeout for SSE connections
-		IdleTimeout:  0, // No idle timeout for SSE connections
+	if err := natsInternal.EnsureStream(js, &cfg.NATS); err != nil {
+		log.Fatalf("Failed to initialize NATS stream: %v", err)
 	}
 
-	// Start server in background
+	httpServer := &http.Server{
+		Addr:              cfg.SSE.ListenAddr,
+		Handler:           sse.Routes(sse.NewHandler(js, &cfg.NATS), cfg.NATS.SubjectPrefix),
+		ReadHeaderTimeout: 5 * time.Second,
+		// streams stay open: no write or idle timeout.
+	}
+
+	serverErr := make(chan error, 1)
 	go func() {
 		slog.Info("Starting SSE server", "address", cfg.SSE.ListenAddr)
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("HTTP server error: %v", err)
+		err := httpServer.ListenAndServe()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
 		}
+		close(serverErr)
 	}()
 
-	// Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
+	select {
+	case sig := <-sigCh:
+		slog.Info("Received signal", "signal", sig)
+	case err := <-serverErr:
+		if err != nil {
+			slog.Error("HTTP server error", "error", err)
+		}
+	}
 
-	// Graceful shutdown
 	slog.Info("Starting graceful shutdown")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		slog.Error("Error shutting down HTTP server", "error", err)
 	}
-
 	slog.Info("Shutdown complete")
-}
-
-// createRouter creates the HTTP router with SSE endpoints
-func createRouter(sseHandler *sse.Handler, cfg *config.Config) *mux.Router {
-	router := mux.NewRouter()
-
-	// Health check
-	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		setCORSHeaders(w)
-		if r.Method == "OPTIONS" {
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"status":"healthy","service":"sse-server"}`)
-	})
-
-	// Stats endpoint
-	router.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
-		setCORSHeaders(w)
-		if r.Method == "OPTIONS" {
-			return
-		}
-
-		stats, err := json.Marshal(sseHandler.GetStats())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(stats)
-	})
-
-	// SSE endpoints
-
-	// All events (firehose)
-	router.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
-		handleSSE(w, r, sseHandler, "all", natsInternal.PrimarySubjects(cfg.NATS.SubjectPrefix))
-	})
-
-	// Organization events
-	router.HandleFunc("/events/org/{org_id:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		orgID := vars["org_id"]
-		subject := fmt.Sprintf("%s.org.%s.>", cfg.NATS.SubjectPrefix, orgID)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("org-%s", orgID), []string{subject})
-	})
-
-	// Repository events
-	router.HandleFunc("/events/repo/{repo_id:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		repoID := vars["repo_id"]
-		subject := fmt.Sprintf("%s.repo.%s.>", cfg.NATS.SubjectPrefix, repoID)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("repo-%s", repoID), []string{subject})
-	})
-
-	// User activity events
-	router.HandleFunc("/events/user/{user_id:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		userID := vars["user_id"]
-		subject := fmt.Sprintf("%s.user.%s.*", cfg.NATS.SubjectPrefix, userID)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("user-%s", userID), []string{subject})
-	})
-
-	// PR-specific events
-	router.HandleFunc("/events/pr/{repo_id:[0-9]+}/{pr_number:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		repoID := vars["repo_id"]
-		prNumber := vars["pr_number"]
-		subject := fmt.Sprintf("%s.pr.%s.%s.>", cfg.NATS.SubjectPrefix, repoID, prNumber)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("pr-%s-%s", repoID, prNumber), []string{subject})
-	})
-
-	// Issue-specific events
-	router.HandleFunc("/events/issue/{repo_id:[0-9]+}/{issue_number:[0-9]+}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		repoID := vars["repo_id"]
-		issueNumber := vars["issue_number"]
-		subject := fmt.Sprintf("%s.issue.%s.%s.>", cfg.NATS.SubjectPrefix, repoID, issueNumber)
-		handleSSE(w, r, sseHandler, fmt.Sprintf("issue-%s-%s", repoID, issueNumber), []string{subject})
-	})
-
-	// Event type filtering across all repos
-	router.HandleFunc("/events/type/{event_type:[a-z_]+}", func(w http.ResponseWriter, r *http.Request) {
-		vars := mux.Vars(r)
-		eventType := vars["event_type"]
-		subjects := []string{
-			fmt.Sprintf("%s.org.*.%s", cfg.NATS.SubjectPrefix, eventType),
-			fmt.Sprintf("%s.global.%s", cfg.NATS.SubjectPrefix, eventType),
-		}
-		handleSSE(w, r, sseHandler, fmt.Sprintf("type-%s", eventType), subjects)
-	})
-
-	return router
-}
-
-// setCORSHeaders sets CORS headers for cross-origin requests
-func setCORSHeaders(w http.ResponseWriter) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Cache-Control, X-Requested-With, Last-Event-ID")
-	w.Header().Set("Access-Control-Expose-Headers", "Content-Type")
-}
-
-// handleSSE handles SSE connections
-func handleSSE(w http.ResponseWriter, r *http.Request, handler *sse.Handler, streamID string, subjects []string) {
-	// Set CORS headers
-	setCORSHeaders(w)
-
-	// Handle OPTIONS
-	if r.Method == "OPTIONS" {
-		return
-	}
-
-	// Create filter from query params
-	filter := createFilterFromQuery(r)
-
-	// Let the SSE handler take over
-	handler.ServeHTTP(w, r, streamID, subjects, filter)
-}
-
-// createFilterFromQuery creates an event filter from query parameters
-func createFilterFromQuery(r *http.Request) *events.EventFilter {
-	eventTypes := r.URL.Query().Get("type")
-	actions := r.URL.Query().Get("action")
-
-	if eventTypes == "" && actions == "" {
-		return nil
-	}
-
-	filter := &events.EventFilter{}
-
-	if eventTypes != "" {
-		filter.Events = strings.Split(eventTypes, ",")
-	}
-
-	if actions != "" {
-		filter.Actions = strings.Split(actions, ",")
-	}
-
-	return filter
 }

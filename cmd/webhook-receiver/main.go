@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -18,85 +17,58 @@ import (
 )
 
 func main() {
-	// Load configuration
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
 	if cfg.Webhook.Secret == "" {
+		if !cfg.Webhook.AllowUnsigned {
+			log.Fatal("WEBHOOK_SECRET is not set. Set it, or set WEBHOOK_ALLOW_UNSIGNED=true to accept unsigned deliveries")
+		}
 		slog.Warn("WEBHOOK_SECRET is not set; unsigned deliveries are accepted")
 	}
 
-	// Create NATS connection
 	nc, err := nats.Connect(&cfg.NATS)
 	if err != nil {
 		log.Fatalf("Failed to connect to NATS: %v", err)
 	}
 	defer nc.Close()
-
-	// Initialize NATS schema
-	schemaManager, err := nats.NewSchemaManager(nc, &cfg.NATS)
+	js, err := nc.JetStream()
 	if err != nil {
-		log.Fatalf("Failed to create schema manager: %v", err)
+		log.Fatalf("Failed to create JetStream context: %v", err)
 	}
-	if err := schemaManager.InitializeSchema(); err != nil {
-		log.Fatalf("Failed to initialize NATS schema: %v", err)
+	if err := nats.EnsureStream(js, &cfg.NATS); err != nil {
+		log.Fatalf("Failed to initialize NATS stream: %v", err)
 	}
 
-	// Create NATS publisher
-	publisher, err := nats.NewPublisher(&cfg.NATS)
-	if err != nil {
-		log.Fatalf("Failed to create NATS publisher: %v", err)
-	}
-	defer publisher.Close()
+	server := webhook.NewServer(&cfg.Webhook, nats.NewPublisher(js, &cfg.NATS))
 
-	// Create webhook server
-	server := webhook.NewServer(&cfg.Webhook, publisher)
-
-	// Create wait group for goroutines
-	var wg sync.WaitGroup
-
-	// Context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Start webhook server in goroutine
-	wg.Add(1)
+	serverErr := make(chan error, 1)
 	go func() {
-		defer wg.Done()
-		if err := server.Start(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("Webhook server error", "error", err)
-			cancel()
+		err := server.Start()
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
 		}
+		close(serverErr)
 	}()
 
-	// Wait for interrupt signal
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
 	case sig := <-sigCh:
 		slog.Info("Received signal", "signal", sig)
-	case <-ctx.Done():
-		slog.Info("Shutting down due to error")
+	case err := <-serverErr:
+		if err != nil {
+			slog.Error("Webhook server error", "error", err)
+		}
 	}
 
-	// Graceful shutdown
 	slog.Info("Starting graceful shutdown")
-
-	// Cancel context to stop processors
-	cancel()
-
-	// Shutdown webhook server
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer shutdownCancel()
-
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		slog.Error("Error shutting down webhook server", "error", err)
 	}
-
-	// Wait for all goroutines to finish
-	wg.Wait()
-
 	slog.Info("Shutdown complete")
 }

@@ -13,7 +13,7 @@ pkgs.buildGoModule {
       ./web
     ];
   };
-  vendorHash = "sha256-vBINr4CD0AXLkm+BsyLckaCXkvmmQOlKmIGcNUL7y6E=";
+  vendorHash = "sha256-/t+5DGpX7YeCuNvuF+E1hRNvqtW/jHkgb/MZBDrAg24=";
   subPackages = [ "cmd/..." ];
   env.CGO_ENABLED = 0;
   # subPackages limits the default checkPhase to cmd/, which has no tests.

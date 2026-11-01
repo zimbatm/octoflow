@@ -53,17 +53,12 @@ func main() {
 	}
 	defer nc.Close()
 
-	schemaManager, err := natsInternal.NewSchemaManager(nc, &cfg.NATS)
-	if err != nil {
-		log.Fatalf("Failed to create schema manager: %v", err)
-	}
-	if err := schemaManager.InitializeSchema(); err != nil {
-		log.Fatalf("Failed to initialize NATS schema: %v", err)
-	}
-
 	js, err := nc.JetStream()
 	if err != nil {
 		log.Fatalf("Failed to create JetStream context: %v", err)
+	}
+	if err := natsInternal.EnsureStream(js, &cfg.NATS); err != nil {
+		log.Fatalf("Failed to initialize NATS stream: %v", err)
 	}
 	state, err := js.KeyValue(stateBucket)
 	if errors.Is(err, nats.ErrBucketNotFound) {
@@ -78,11 +73,7 @@ func main() {
 		log.Fatalf("Failed to open state bucket: %v", err)
 	}
 
-	publisher, err := natsInternal.NewPublisher(&cfg.NATS)
-	if err != nil {
-		log.Fatalf("Failed to create publisher: %v", err)
-	}
-	defer publisher.Close()
+	publisher := natsInternal.NewPublisher(js, &cfg.NATS)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()

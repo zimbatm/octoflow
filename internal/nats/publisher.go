@@ -15,25 +15,15 @@ import (
 // streamLabel is the fixed value of the metrics' stream label.
 const streamLabel = "events"
 
-// Publisher publishes events to the JetStream stream.
+// Publisher publishes events to the JetStream stream over a connection the
+// caller owns.
 type Publisher struct {
-	config *config.NATSConfig
-	nc     *nats.Conn
+	prefix string
 	js     nats.JetStreamContext
 }
 
-// NewPublisher opens its own NATS connection.
-func NewPublisher(cfg *config.NATSConfig) (*Publisher, error) {
-	nc, err := Connect(cfg)
-	if err != nil {
-		return nil, err
-	}
-	js, err := nc.JetStream()
-	if err != nil {
-		nc.Close()
-		return nil, fmt.Errorf("failed to create JetStream context: %w", err)
-	}
-	return &Publisher{config: cfg, nc: nc, js: js}, nil
+func NewPublisher(js nats.JetStreamContext, cfg *config.NATSConfig) *Publisher {
+	return &Publisher{prefix: cfg.SubjectPrefix, js: js}
 }
 
 // PublishEvent publishes a GitHub event under its org or global subject,
@@ -44,14 +34,16 @@ func (p *Publisher) PublishEvent(ctx context.Context, event *events.GitHubEvent)
 		metrics.RecordNATSPublish(streamLabel, event.Event, "marshal_error", 0)
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
-	return p.PublishToSubject(ctx, p.buildSubject(event), event.Event, data, event.ID)
+	return p.PublishToSubject(ctx, p.Subject(event), event.Event, data, event.ID)
 }
 
-func (p *Publisher) buildSubject(event *events.GitHubEvent) string {
+// Subject is the primary subject of an event: org.{org_id}.{type}, or
+// global.{type} when the event has no organization.
+func (p *Publisher) Subject(event *events.GitHubEvent) string {
 	if event.OrganizationID != "" {
-		return fmt.Sprintf("%s.org.%s.%s", p.config.SubjectPrefix, event.OrganizationID, event.Event)
+		return fmt.Sprintf("%s.org.%s.%s", p.prefix, event.OrganizationID, event.Event)
 	}
-	return fmt.Sprintf("%s.global.%s", p.config.SubjectPrefix, event.Event)
+	return fmt.Sprintf("%s.global.%s", p.prefix, event.Event)
 }
 
 // PublishToSubject publishes data and waits for the stream's ack. msgID is
@@ -77,12 +69,5 @@ func (p *Publisher) PublishToSubject(ctx context.Context, subject, eventType str
 	case <-ctx.Done():
 		status = "timeout"
 		return ctx.Err()
-	}
-}
-
-// Close closes the NATS connection
-func (p *Publisher) Close() {
-	if p.nc != nil {
-		p.nc.Close()
 	}
 }
