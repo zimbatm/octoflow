@@ -5,7 +5,7 @@ pkgs.mkShell {
     pkgs.go
     pkgs.golangci-lint
     pkgs.gopls
-    pkgs.nixfmt-rfc-style
+    pkgs.nixfmt
 
     pkgs.natscli
     pkgs.nats-server
