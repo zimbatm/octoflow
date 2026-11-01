@@ -133,18 +133,19 @@ func (w *S3Writer) FlushIfDue() {
 	}
 }
 
-// Flush writes the current batch to S3.
-func (w *S3Writer) Flush() error {
+// Flush writes the current batch to S3. A failed upload is logged here and
+// reported to each event's Done callback.
+func (w *S3Writer) Flush() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.flushLocked()
+	w.flushLocked()
 }
 
 // flushLocked always empties the batch: on failure the callers nak, and
 // JetStream redelivers into a later batch.
-func (w *S3Writer) flushLocked() error {
+func (w *S3Writer) flushLocked() {
 	if len(w.batch) == 0 {
-		return nil
+		return
 	}
 
 	start := time.Now()
@@ -166,7 +167,6 @@ func (w *S3Writer) flushLocked() error {
 	w.done = w.done[:0]
 	w.batchSize = 0
 	w.lastFlush = time.Now()
-	return err
 }
 
 func (w *S3Writer) upload() error {
@@ -225,9 +225,4 @@ func (w *S3Writer) generateS3Key() string {
 	now := time.Now().UTC()
 	return fmt.Sprintf("%s/%04d/%02d/%02d/%d.parquet",
 		w.config.KeyPrefix, now.Year(), now.Month(), now.Day(), now.UnixNano())
-}
-
-// Close flushes any remaining events
-func (w *S3Writer) Close() error {
-	return w.Flush()
 }

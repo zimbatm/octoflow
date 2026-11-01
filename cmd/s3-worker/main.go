@@ -34,7 +34,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create S3 writer: %v", err)
 	}
-	defer s3Writer.Close()
 
 	// Connect to NATS
 	nc, err := natsInternal.Connect(&cfg.NATS)
@@ -123,10 +122,8 @@ func main() {
 	// Wait for workers to finish
 	wg.Wait()
 
-	// Final flush
-	if err := s3Writer.Flush(); err != nil {
-		slog.Error("Error during final flush", "error", err)
-	}
+	// the flush acks through nc, so it must run before the deferred nc.Close.
+	s3Writer.Flush()
 
 	slog.Info("Shutdown complete")
 }
