@@ -17,6 +17,7 @@ pages, each with one job.
 - [Deploy on NixOS](how-to/deploy-on-nixos.md)
 - [Ingest repositories without a webhook](how-to/ingest-public-repositories.md)
 - [Query the Parquet archive](how-to/query-the-parquet-archive.md)
+- [Restore events from the archive](how-to/restore-from-the-archive.md)
 - [Inspect the stream with the NATS CLI](how-to/inspect-the-stream.md)
 - [Troubleshoot](how-to/troubleshoot.md)
 

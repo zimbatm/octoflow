@@ -10,6 +10,8 @@ pkgs.testers.runNixOSTest {
       environment.systemPackages = [
         pkgs.curl
         pkgs.openssl
+        pkgs.natscli
+        flake.packages.${pkgs.stdenv.hostPlatform.system}.default
       ];
 
       systemd.services.rustfs = {
@@ -102,5 +104,24 @@ pkgs.testers.runNixOSTest {
     with subtest("the s3-worker writes the batch when it stops"):
       machine.succeed("systemctl stop octoflow-s3")
       machine.succeed("journalctl -u octoflow-s3 | grep 'msg=\"Uploaded batch to S3\" event_count=1'")
+
+    with subtest("the archive restores a lost stream"):
+      machine.succeed("nats --server nats://127.0.0.1:4222 stream rm GITHUB_EVENTS_RAW -f")
+      machine.succeed("systemctl restart octoflow-webhook octoflow-dispatcher octoflow-sse")
+      for unit in ["octoflow-webhook", "octoflow-dispatcher", "octoflow-sse"]:
+        machine.wait_for_unit(unit + ".service")
+      machine.wait_for_open_port(8181)
+      out = machine.succeed(
+        "S3_BUCKET=octoflow S3_ENDPOINT=http://127.0.0.1:9000 AWS_REGION=us-east-1 "
+        "AWS_ACCESS_KEY_ID=testkey AWS_SECRET_ACCESS_KEY=testsecret "
+        "octoflow restore --from $(date -u +%F)"
+      )
+      assert "published=1 duplicates=0" in out, out
+      for route in ["org/222", "repo/111", "pr/111/7"]:
+        out = machine.wait_until_succeeds(
+          f"timeout 3 curl -sN 'http://127.0.0.1:8181/events/{route}?last=10' | grep -c '^event: pull_request' || true",
+          timeout=30,
+        ).strip()
+        assert out == "1", f"{route} after restore: {out} events"
   '';
 }

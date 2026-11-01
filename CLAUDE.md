@@ -43,6 +43,8 @@ run `nix build`, copy the hash it prints).
    from its own address or `?sse=`.
 6. `public-ingest`: reads the GitHub Events API and GH Archive for
    repositories without a webhook (`internal/publicingest`, best-effort).
+7. `restore --from DATE`: publishes archived events from S3 back into the
+   stream (`internal/restore`); not a service, exits when done.
 
 `main.go` owns config, the one NATS connection, the stream, signals and
 shutdown; `services.go` has one `run` function per service.
@@ -70,7 +72,8 @@ whole stream sees each event once per copy; consume the primary subjects
 - `internal/natstest`: embedded nats-server for tests
 - `internal/dispatch`: fan-out subjects and republishing
 - `internal/webhook`: HTTP server and GitHub webhook handler
-- `internal/storage`: Parquet batching behind an Uploader interface
+- `internal/storage`: Parquet batching behind an Uploader interface, and the reader
+- `internal/restore`: archive to stream
 - `internal/sse`: SSE handler, routes and writer
 - `internal/ghevents`: Events API client, GH Archive reader, conversion
 - `internal/publicingest`: polling loops and progress for public-ingest

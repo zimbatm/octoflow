@@ -52,6 +52,7 @@ The [documentation index](docs/README.md) follows Diátaxis:
   [deploy on NixOS](docs/how-to/deploy-on-nixos.md),
   [ingest public repositories](docs/how-to/ingest-public-repositories.md),
   [query the Parquet archive](docs/how-to/query-the-parquet-archive.md),
+  [restore from the archive](docs/how-to/restore-from-the-archive.md),
   [inspect the stream](docs/how-to/inspect-the-stream.md),
   [troubleshoot](docs/how-to/troubleshoot.md)
 - **Reference**: [configuration](docs/reference/configuration.md),
@@ -79,6 +80,7 @@ one process:
 | `sse` | streams any subject to browsers, with replay and resume |
 | `dashboard` | serves the demo page in `web/` |
 | `public-ingest` | reads the Events API and GH Archive for repositories without a webhook |
+| `restore --from DATE` | publishes archived events from S3 back into the stream |
 
 ## Development
 

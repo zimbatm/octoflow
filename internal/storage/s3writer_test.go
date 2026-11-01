@@ -192,3 +192,45 @@ func TestBatchMaxBytesTriggersFlush(t *testing.T) {
 		t.Fatal("not flushed once the byte limit was reached")
 	}
 }
+
+func TestDecodeParquetRestoresTheEvent(t *testing.T) {
+	w := &S3Writer{config: &config.S3Config{CompressionType: "snappy", RowGroupSize: 10000}}
+	received := time.Date(2026, 10, 14, 12, 0, 0, 123_000_000, time.UTC)
+	in := &events.GitHubEvent{
+		ID: "d1", Event: "pull_request", Action: "opened", HookID: "h", HookInstallation: "i",
+		ReceivedAt: received, Payload: json.RawMessage(`{"action":"opened","number":7}`),
+		Repository: "o/r", RepositoryID: "111", Organization: "o", OrganizationID: "222",
+		Sender: "s", SenderID: "2", Metadata: map[string]string{"source": "webhook"},
+	}
+	data, err := w.encodeParquet([]*events.GitHubEvent{in, event("d2")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := DecodeParquet(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 || out[1].ID != "d2" {
+		t.Fatalf("decoded %d events, want d1 then d2", len(out))
+	}
+	got := out[0]
+	want := *in
+	want.Metadata = nil // not archived
+	if !got.ReceivedAt.Equal(received) {
+		t.Errorf("received_at = %v, want %v (millisecond precision)", got.ReceivedAt, received)
+	}
+	got.ReceivedAt, want.ReceivedAt = time.Time{}, time.Time{}
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(&want)
+	if string(gotJSON) != string(wantJSON) {
+		t.Errorf("decoded\n%s\nwant\n%s", gotJSON, wantJSON)
+	}
+}
+
+func TestDayPrefix(t *testing.T) {
+	got := DayPrefix("github-events", time.Date(2026, 1, 5, 23, 59, 0, 0, time.FixedZone("x", 3600)))
+	if got != "github-events/2026/01/05/" {
+		t.Errorf("DayPrefix = %q", got)
+	}
+}

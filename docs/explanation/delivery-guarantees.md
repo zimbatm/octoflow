@@ -68,3 +68,12 @@ publishing, so a crash replays at most one poll or one hour.
 On SIGTERM every service stops taking new work, finishes what it holds,
 and returns; HTTP servers get 30 seconds for in-flight requests. The
 NATS connection closes last.
+
+## After a loss
+
+The archive is the backup of the stream. `octoflow restore` reads the
+Parquet files for a date range and publishes the events again with their
+original ids, so the dispatcher recreates the copies and consumers see
+them as new. Within the duplicate window the stream drops what it still
+has, so a restore can overlap with live data. See [Restore events from
+the archive](../how-to/restore-from-the-archive.md).

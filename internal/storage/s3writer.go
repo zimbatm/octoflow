@@ -5,12 +5,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/minio/minio-go/v7"
-	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/xitongsys/parquet-go-source/buffer"
 	"github.com/xitongsys/parquet-go/parquet"
 	"github.com/xitongsys/parquet-go/writer"
@@ -78,35 +76,11 @@ type S3Writer struct {
 	lastFlush time.Time
 }
 
-// NewS3Writer uploads to the bucket in cfg. Static credentials are used when
-// AccessKeyID is set; otherwise the environment, the shared credentials
-// file and the instance role are tried in that order.
+// NewS3Writer uploads to the bucket in cfg; see newClient for credentials.
 func NewS3Writer(cfg *config.S3Config) (*S3Writer, error) {
-	endpoint := cfg.Endpoint
-	if endpoint == "" {
-		endpoint = fmt.Sprintf("s3.%s.amazonaws.com", cfg.Region)
-	}
-	useSSL := !strings.HasPrefix(endpoint, "http://")
-	endpoint = strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
-
-	var creds *credentials.Credentials
-	if cfg.AccessKeyID != "" {
-		creds = credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, cfg.SessionToken)
-	} else {
-		creds = credentials.NewChainCredentials([]credentials.Provider{
-			&credentials.EnvAWS{},
-			&credentials.FileAWSCredentials{},
-			&credentials.IAM{},
-		})
-	}
-
-	client, err := minio.New(endpoint, &minio.Options{
-		Creds:  creds,
-		Secure: useSSL,
-		Region: cfg.Region,
-	})
+	client, err := newClient(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create S3 client: %w", err)
+		return nil, err
 	}
 	return NewWriter(cfg, &minioUploader{client: client, bucket: cfg.Bucket}), nil
 }
@@ -120,6 +94,14 @@ func NewWriter(cfg *config.S3Config, up Uploader) *S3Writer {
 		batch:     make([]*events.GitHubEvent, 0, cfg.BatchSize),
 		lastFlush: time.Now(),
 	}
+}
+
+// SetClock replaces time.Now for tests; it also resets the batch timer.
+func (w *S3Writer) SetClock(now func() time.Time) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.now = now
+	w.lastFlush = now()
 }
 
 type minioUploader struct {
@@ -249,6 +231,12 @@ func (w *S3Writer) encodeParquet(eventList []*events.GitHubEvent) ([]byte, error
 // objectKey returns prefix/YYYY/MM/DD/<unix nanos>.parquet
 func (w *S3Writer) objectKey() string {
 	now := w.now().UTC()
-	return fmt.Sprintf("%s/%04d/%02d/%02d/%d.parquet",
-		w.config.KeyPrefix, now.Year(), now.Month(), now.Day(), now.UnixNano())
+	return fmt.Sprintf("%s%d.parquet", DayPrefix(w.config.KeyPrefix, now), now.UnixNano())
+}
+
+// DayPrefix is the key prefix of the files uploaded on one UTC day,
+// prefix/YYYY/MM/DD/.
+func DayPrefix(keyPrefix string, day time.Time) string {
+	day = day.UTC()
+	return fmt.Sprintf("%s/%04d/%02d/%02d/", keyPrefix, day.Year(), day.Month(), day.Day())
 }

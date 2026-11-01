@@ -1,0 +1,71 @@
+# Restore events from the archive
+
+`octoflow restore` reads the Parquet files the s3 service wrote and
+publishes the events back into the stream, on their primary subjects
+and with their original ids. The dispatcher fans them out again as if
+they had just arrived. Use it after the stream was lost, or to feed a
+new consumer events older than the stream's seven days.
+
+## 1. Point it at the archive and the stream
+
+The command reads the same settings as the s3 service (`S3_BUCKET`,
+`S3_ENDPOINT`, `AWS_REGION`, credentials, `S3_KEY_PREFIX`) and the NATS
+settings. On a NixOS host, source the s3 unit's environment file; on a
+laptop, `.env` already has them.
+
+## 2. Count first
+
+```bash
+octoflow restore --from 2026-10-01 --to 2026-10-14 --dry-run
+```
+
+```
+restore: files=312 rows=48112 matched=48112 published=0 duplicates=0
+```
+
+`--from` and `--to` are UTC dates, inclusive, matched against each
+event's `received_at`. The command also reads the day after `--to`,
+because a file is named after its upload time and holds events
+received before it.
+
+## 3. Narrow it down, if you want
+
+```bash
+octoflow restore --from 2026-10-01 --event pull_request,issues --repo 4542716
+octoflow restore --from 2026-10-01 --org 487568
+```
+
+## 4. Restore
+
+```bash
+octoflow restore --from 2026-10-01 --to 2026-10-14
+```
+
+```
+restore: files=312 rows=48112 matched=48112 published=47990 duplicates=122
+```
+
+Events the stream still holds, that is, events received within the
+stream's 24 hour duplicate window, are dropped by the stream and counted
+as duplicates. Running the same restore twice is therefore harmless as
+long as the first run is less than 24 hours old; after that the stream
+stores the events again.
+
+Order within a file is preserved and files are read in name order, so
+events come back in the order they were archived. The command stops at
+the first error and prints the counts so far; rerun it to continue, the
+duplicate window takes care of what was already published.
+
+## 5. Check the consumers
+
+Durable consumers created with `DeliverNew` receive the restored events
+like any new ones. The s3 service receives them too and archives them
+again; the new files repeat the old ones. That is expected after a
+stream loss; for a reprocessing run, stop the s3 service first if you
+do not want the archive to grow.
+
+## What is not restored
+
+`metadata` (the public-ingest source fields) is not in the Parquet
+schema, so restored public events have none. Fan-out copies are not
+stored; the dispatcher recreates them.
