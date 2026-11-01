@@ -160,25 +160,20 @@ func subscribeAndProcess(ctx context.Context, js nats.JetStreamContext, cfg *con
 			}
 
 			for _, msg := range msgs {
-				processMessage(msg, cfg, s3Writer)
+				processMessage(msg, s3Writer)
 			}
 		}
 	}
 }
 
 // processMessage leaves the ack to the S3 writer, which acks after upload.
-func processMessage(msg *nats.Msg, cfg *config.Config, s3Writer *storage.S3Writer) {
+func processMessage(msg *nats.Msg, s3Writer *storage.S3Writer) {
 	var event events.GitHubEvent
 	if err := json.Unmarshal(msg.Data, &event); err != nil {
 		slog.Error("Dropping undecodable message", "subject", msg.Subject, "error", err)
 		if err := msg.Term(); err != nil {
 			slog.Warn("Failed to terminate message", "subject", msg.Subject, "error", err)
 		}
-		return
-	}
-
-	if cfg.Processing.S3Filter != nil && !cfg.Processing.S3Filter.Matches(&event) {
-		natsInternal.AckOrNak(msg, nil)
 		return
 	}
 

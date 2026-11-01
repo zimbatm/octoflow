@@ -321,16 +321,9 @@ Using numeric IDs means:
 
 ## Event Filtering
 
-Configure filters in your environment:
-
-```yaml
-processing:
-  s3_filter:
-    events: ["!ping"]  # Exclude ping events from S3
-  
-  sse_filter:
-    events: ["pull_request", "issues"]  # Only these for SSE
-```
+Consumers filter by NATS subject, see the subscription examples above.
+The SSE routes also take `?type=` and `?action=` query parameters. The
+S3 worker stores every event.
 
 ## Monitoring
 
