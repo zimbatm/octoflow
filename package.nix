@@ -14,17 +14,17 @@ pkgs.buildGoModule {
     ];
   };
   vendorHash = "sha256-/t+5DGpX7YeCuNvuF+E1hRNvqtW/jHkgb/MZBDrAg24=";
-  subPackages = [ "cmd/..." ];
+  subPackages = [ "cmd/octoflow" ];
   env.CGO_ENABLED = 0;
-  # subPackages limits the default checkPhase to cmd/, which has no tests.
+  # subPackages limits the default checkPhase to the binary; test everything.
   checkPhase = ''
     runHook preCheck
-    go test ./internal/... ./pkg/...
+    go test ./...
     runHook postCheck
   '';
   postInstall = ''
     mkdir -p $out/share/octoflow
     cp -r web $out/share/octoflow/
   '';
-  meta.mainProgram = "webhook-receiver";
+  meta.mainProgram = "octoflow";
 }

@@ -32,9 +32,7 @@ Event Dispatcher (Entity Router)
       ├── github.events.repo.{repo_id}.{event_type}
       ├── github.events.user.{user_id}.{event_type}
       ├── github.events.pr.{repo_id}.{pr_number}.{event_type}
-      ├── github.events.pr.{repo_id}.{pr_number}
-      ├── github.events.issue.{repo_id}.{issue_number}.{event_type}
-      └── github.events.issue.{repo_id}.{issue_number}
+      └── github.events.issue.{repo_id}.{issue_number}.{event_type}
             |
             v
       Consumer Applications
@@ -181,10 +179,11 @@ make run
 
 # Or start services individually:
 nats-server -js                    # NATS with JetStream
-./bin/webhook-receiver             # Receives GitHub webhooks
-./bin/event-dispatcher             # Routes to entity subjects  
-./bin/s3-worker                   # Backs up to S3
-./bin/sse-server                  # Streams to web clients
+./bin/octoflow webhook             # Receives GitHub webhooks
+./bin/octoflow dispatcher          # Routes to entity subjects
+./bin/octoflow s3                  # Backs up to S3
+./bin/octoflow sse                 # Streams to web clients
+./bin/octoflow all                 # Or everything in one process
 ```
 
 Dashboard available at http://localhost:8082
@@ -204,10 +203,10 @@ nats sub "github.events.repo.*.push"
 nats sub "github.events.user.11111111.*"
 
 # Watch PR #456 in repo 87654321
-nats sub "github.events.pr.87654321.456"
+nats sub "github.events.pr.87654321.456.*"
 
 # All PRs in a repository, one copy per event
-nats sub "github.events.pr.87654321.*"
+nats sub "github.events.pr.87654321.*.*"
 ```
 
 ### Go Application
@@ -233,7 +232,7 @@ _, _ = js.Subscribe("github.events.org.12345678.>", func(msg *nats.Msg) {
 ```
 
 Other subjects: `github.events.user.11111111.*` for everything a user is
-involved in, `github.events.pr.87654321.456` for one pull request. See
+involved in, `github.events.pr.87654321.456.*` for one pull request. See
 [examples/](examples/) for two complete programs and the subject table.
 
 ### JavaScript (SSE)
@@ -449,7 +448,7 @@ See the [examples/](examples/) directory for complete working examples:
 - **Deduplication**: 24-hour window on the message id (delivery id, or
   `<delivery id>@<subject>` for a fan-out copy)
 - **Retention**: 7 days by default; each event is stored once per subject it
-  is routed to (repo, every involved user, PR and issue, twice each)
+  is routed to (repo, every involved user, PR, issue)
 - **Delivery**: At-least-once guarantee
 
 ### Component Responsibilities

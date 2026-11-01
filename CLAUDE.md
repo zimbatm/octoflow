@@ -12,48 +12,55 @@ The README is the reference; this file lists what you need to work here.
 
 ```bash
 nix develop            # Go, golangci-lint, nats-server, nats CLI, rustfs, hivemind
-make build             # all binaries into ./bin, then go build ./...
+make build             # bin/octoflow, then go build ./...
 make test              # go test ./...; several packages start an embedded NATS server
+make test-race         # the same with the race detector
 make lint              # golangci-lint run (config in .golangci.yml)
 make fmt               # gofmt + go mod tidy
-make run               # all services under hivemind, see Procfile and .env.example
+make run               # all services as processes under hivemind, see Procfile
 nix flake check        # builds the package, runs the Go tests and the NixOS VM test
 ```
 
-Run a single service with `go run ./cmd/<name>`. After a go.mod change,
-update `vendorHash` in package.nix (set it to `pkgs.lib.fakeHash`, run
-`nix build`, copy the hash it prints).
+One binary, one subcommand per service: `go run ./cmd/octoflow <service>`,
+or `octoflow all` for every service in one process (s3 only with
+`S3_BUCKET`, public-ingest only with `PUBLIC_REPOS`). After a go.mod
+change, update `vendorHash` in package.nix (set it to `pkgs.lib.fakeHash`,
+run `nix build`, copy the hash it prints).
 
-## Services (`cmd/`)
+## Services (`cmd/octoflow`)
 
-1. `webhook-receiver` (port 8080): validates the GitHub signature, publishes
-   to the primary subjects, replies 200 only after JetStream acked. Refuses
-   to start without `WEBHOOK_SECRET` unless `WEBHOOK_ALLOW_UNSIGNED=true`.
-2. `event-dispatcher`: consumes the primary subjects and republishes each
-   event to repo, user, pr and issue subjects (`internal/dispatch`).
-3. `s3-worker`: batches primary events into Parquet files in S3; acks only
-   after the upload (`internal/storage`).
-4. `sse-server` (port 8081): streams events to browsers; `Last-Event-ID`
-   is the JetStream sequence (`internal/sse`).
+1. `webhook` (port 8080): validates the GitHub signature, publishes to the
+   primary subjects, replies 200 only after JetStream acked. Refuses to
+   start without `WEBHOOK_SECRET` unless `WEBHOOK_ALLOW_UNSIGNED=true`.
+2. `dispatcher`: consumes the primary subjects and republishes each event
+   to repo, user, pr and issue subjects (`internal/dispatch`).
+3. `s3`: batches primary events into Parquet files in S3; acks only after
+   the upload (`internal/storage`).
+4. `sse` (port 8081): streams events to browsers; `Last-Event-ID` is the
+   JetStream sequence (`internal/sse`).
 5. `dashboard` (port 8082): serves `web/`; the page finds the SSE server
    from its own address or `?sse=`.
 6. `public-ingest`: reads the GitHub Events API and GH Archive for
    repositories without a webhook (`internal/publicingest`, best-effort).
 
+`main.go` owns config, the one NATS connection, the stream, signals and
+shutdown; `services.go` has one `run` function per service.
+
 ## NATS subjects
 
 - Primary: `github.events.org.{org_id}.{event_type}` and
-  `github.events.global.{event_type}` (webhook receiver, public-ingest)
+  `github.events.global.{event_type}` (webhook, public-ingest)
 - Fan-out: `github.events.repo.{repo_id}.{event_type}`,
   `github.events.user.{user_id}.{event_type}`,
-  `github.events.pr.{repo_id}.{number}[.{event_type}]`,
-  `github.events.issue.{repo_id}.{number}[.{event_type}]`
+  `github.events.pr.{repo_id}.{number}.{event_type}`,
+  `github.events.issue.{repo_id}.{number}.{event_type}`
 
+Every fan-out subject ends in the event type: one pull request is
+`pr.{repo}.{n}.*`, all pull requests of a repository `pr.{repo}.*.*`.
 All subjects share one stream, `GITHUB_EVENTS_RAW`, which deduplicates by
-message id for 24 hours (fan-out copies use `<id>@<subject>`). A consumer
-of the whole stream sees each event once per copy; consume the primary
-subjects (`internal/nats.PrimarySubjects`) unless you want the copies, and
-use `pr.{repo}.*`, not `pr.{repo}.>`, for all pull requests of a repository.
+message id for 24 hours (copies use `<id>@<subject>`). A consumer of the
+whole stream sees each event once per copy; consume the primary subjects
+(`internal/nats.PrimarySubjects`) unless you want the copies.
 
 ## Packages
 
@@ -79,14 +86,14 @@ a VM.
 ```bash
 WEBHOOK_SECRET=...            # required; WEBHOOK_ALLOW_UNSIGNED=true to run without
 WEBHOOK_ALLOWED_ORGS=a,b      # optional allow-list
-S3_BUCKET=...                 # s3-worker only
+S3_BUCKET=...                 # s3 only
 S3_ENDPOINT=http://...        # R2, rustfs; unset for AWS
 AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   # unset keys: AWS credential chain
 NATS_URL=nats://localhost:4222
 NATS_USERNAME / NATS_PASSWORD / NATS_TOKEN / NATS_NKEY_SEED
 NATS_STREAM_REPLICAS=1
-PUBLIC_REPOS=NixOS/nixpkgs    # public-ingest only; GITHUB_TOKEN, GHARCHIVE_START
-DASHBOARD_LISTEN_ADDR=:8082
+PUBLIC_REPOS=NixOS/nixpkgs    # public-ingest only; GITHUB_TOKEN, EVENTS_API_INTERVAL, GHARCHIVE_START
+DASHBOARD_LISTEN_ADDR=:8082   # WEB_DIR=./web
 ```
 
 See `.env.example`; `nix develop` loads `.env` when it exists.
@@ -101,6 +108,7 @@ See `.env.example`; `nix develop` loads `.env` when it exists.
 
 ## Deployment
 
-`modules/nixos/default.nix` exports `services.octoflow`; `checks/nixos.nix`
-is its VM test. To expose a local receiver, run
+`modules/nixos/default.nix` exports `services.octoflow`, one systemd unit
+per service running `octoflow <service>`; `checks/nixos.nix` is its VM
+test. To expose a local receiver, run
 `cloudflared tunnel --url http://localhost:8080` yourself.

@@ -29,11 +29,12 @@ go mod download
 make build
 ```
 
-This creates binaries in the `bin/` directory:
-- `webhook-receiver` - Receives GitHub webhooks
-- `event-dispatcher` - Routes events to entity subjects
-- `s3-worker` - Backs up events to S3
-- `sse-server` - Streams events to web clients
+This creates one binary, `bin/octoflow`, with a subcommand per service:
+- `octoflow webhook` - Receives GitHub webhooks
+- `octoflow dispatcher` - Routes events to entity subjects
+- `octoflow s3` - Backs up events to S3
+- `octoflow sse` - Streams events to web clients
+- `octoflow all` - Everything in one process
 
 ## Step 2: Set Up NATS
 
@@ -113,16 +114,16 @@ This starts all components using Hivemind.
 ### Option B: Individual Services (Production)
 ```bash
 # Terminal 1: Webhook receiver
-./bin/webhook-receiver
+./bin/octoflow webhook
 
 # Terminal 2: Event dispatcher
-./bin/event-dispatcher
+./bin/octoflow dispatcher
 
 # Terminal 3: S3 worker
-./bin/s3-worker
+./bin/octoflow s3
 
 # Terminal 4: SSE server (optional)
-./bin/sse-server
+./bin/octoflow sse
 ```
 
 ## Step 6: Verify Setup

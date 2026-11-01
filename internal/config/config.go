@@ -11,11 +11,13 @@ import (
 // Config holds the settings of all services. Every value comes from the
 // environment; there is no configuration file.
 type Config struct {
-	Webhook    WebhookConfig
-	NATS       NATSConfig
-	S3         S3Config
-	SSE        SSEConfig
-	Processing ProcessingConfig
+	Webhook      WebhookConfig
+	NATS         NATSConfig
+	S3           S3Config
+	SSE          SSEConfig
+	Dashboard    DashboardConfig
+	PublicIngest PublicIngestConfig
+	Processing   ProcessingConfig
 }
 
 type WebhookConfig struct {
@@ -74,6 +76,26 @@ type SSEConfig struct {
 	ListenAddr string
 }
 
+type DashboardConfig struct {
+	ListenAddr string
+	// directory with index.html
+	WebDir string
+}
+
+type PublicIngestConfig struct {
+	// repositories without a webhook, as owner/name; empty disables the service
+	Repos       []string
+	GitHubToken string
+
+	EventsAPI         bool
+	EventsAPIInterval time.Duration
+
+	GHArchive    bool
+	GHArchiveURL string
+	// first hour to import when no progress is saved; zero means three hours ago
+	GHArchiveStart time.Time
+}
+
 type ProcessingConfig struct {
 	// pull workers per durable consumer in the dispatcher and the s3-worker
 	NumWorkers int
@@ -86,7 +108,7 @@ func LoadFromEnv() (*Config, error) {
 		Webhook: WebhookConfig{
 			ListenAddr:     getEnvOrDefault("WEBHOOK_LISTEN_ADDR", ":8080"),
 			Secret:         os.Getenv("WEBHOOK_SECRET"),
-			AllowUnsigned:  envBool("WEBHOOK_ALLOW_UNSIGNED"),
+			AllowUnsigned:  envBool("WEBHOOK_ALLOW_UNSIGNED", false),
 			MaxPayloadSize: 25 << 20,
 			RequestTimeout: 10 * time.Second,
 			AllowedOrgs:    splitList(os.Getenv("WEBHOOK_ALLOWED_ORGS")),
@@ -123,6 +145,18 @@ func LoadFromEnv() (*Config, error) {
 		SSE: SSEConfig{
 			ListenAddr: getEnvOrDefault("SSE_LISTEN_ADDR", ":8081"),
 		},
+		Dashboard: DashboardConfig{
+			ListenAddr: getEnvOrDefault("DASHBOARD_LISTEN_ADDR", ":8082"),
+			WebDir:     getEnvOrDefault("WEB_DIR", "./web"),
+		},
+		PublicIngest: PublicIngestConfig{
+			Repos:             splitList(os.Getenv("PUBLIC_REPOS")),
+			GitHubToken:       os.Getenv("GITHUB_TOKEN"),
+			EventsAPI:         envBool("EVENTS_API_ENABLED", true),
+			EventsAPIInterval: time.Minute,
+			GHArchive:         envBool("GHARCHIVE_ENABLED", true),
+			GHArchiveURL:      getEnvOrDefault("GHARCHIVE_URL", "https://data.gharchive.org"),
+		},
 		Processing: ProcessingConfig{
 			NumWorkers: 10,
 		},
@@ -135,6 +169,20 @@ func LoadFromEnv() (*Config, error) {
 		}
 		cfg.NATS.StreamReplicas = n
 	}
+	if s := os.Getenv("EVENTS_API_INTERVAL"); s != "" {
+		d, err := time.ParseDuration(s)
+		if err != nil {
+			return nil, fmt.Errorf("EVENTS_API_INTERVAL: %w", err)
+		}
+		cfg.PublicIngest.EventsAPIInterval = d
+	}
+	if s := os.Getenv("GHARCHIVE_START"); s != "" {
+		t, err := time.Parse(time.RFC3339, s)
+		if err != nil {
+			return nil, fmt.Errorf("GHARCHIVE_START: %w", err)
+		}
+		cfg.PublicIngest.GHArchiveStart = t
+	}
 
 	return cfg, nil
 }
@@ -146,8 +194,11 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
-func envBool(key string) bool {
-	b, _ := strconv.ParseBool(os.Getenv(key))
+func envBool(key string, def bool) bool {
+	b, err := strconv.ParseBool(os.Getenv(key))
+	if err != nil {
+		return def
+	}
 	return b
 }
 

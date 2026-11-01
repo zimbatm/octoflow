@@ -1,9 +1,7 @@
 package webhook
 
 import (
-	"context"
 	"io"
-	"log/slog"
 	"net/http"
 	"time"
 
@@ -11,14 +9,8 @@ import (
 	"github.com/zimbatm/octoflow/internal/config"
 )
 
-// Server represents the webhook HTTP server
-type Server struct {
-	config     *config.WebhookConfig
-	httpServer *http.Server
-}
-
-// NewServer creates a new webhook server
-func NewServer(cfg *config.WebhookConfig, publisher Publisher) *Server {
+// NewServer returns the receiver's HTTP server, ready for ListenAndServe.
+func NewServer(cfg *config.WebhookConfig, publisher Publisher) *http.Server {
 	handler := NewHandler(cfg, publisher)
 
 	mux := http.NewServeMux()
@@ -37,29 +29,14 @@ func NewServer(cfg *config.WebhookConfig, publisher Publisher) *Server {
 		mux.Handle(cfg.MetricsPath, promhttp.Handler())
 	}
 
-	return &Server{
-		config: cfg,
-		httpServer: &http.Server{
-			Addr:        cfg.ListenAddr,
-			Handler:     mux,
-			ReadTimeout: cfg.RequestTimeout,
-			// leave room to write the 503 after a publish times out.
-			WriteTimeout: cfg.RequestTimeout + 5*time.Second,
-			IdleTimeout:  120 * time.Second,
-		},
+	return &http.Server{
+		Addr:        cfg.ListenAddr,
+		Handler:     mux,
+		ReadTimeout: cfg.RequestTimeout,
+		// leave room to write the 503 after a publish times out.
+		WriteTimeout: cfg.RequestTimeout + 5*time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
-}
-
-// Start starts the webhook server
-func (s *Server) Start() error {
-	slog.Info("Starting webhook server", "address", s.config.ListenAddr)
-	return s.httpServer.ListenAndServe()
-}
-
-// Shutdown gracefully shuts down the server
-func (s *Server) Shutdown(ctx context.Context) error {
-	slog.Info("Shutting down webhook server")
-	return s.httpServer.Shutdown(ctx)
 }
 
 // rootHandler provides helpful information about the webhook service

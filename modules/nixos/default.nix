@@ -35,7 +35,8 @@ let
   mkService =
     {
       description,
-      bin,
+      # subcommand of the octoflow binary
+      service,
       environment ? { },
       environmentFile ? null,
     }:
@@ -47,7 +48,7 @@ let
       requires = lib.optional cfg.nats.enable "nats.service";
       environment = common // environment;
       serviceConfig = hardening // {
-        ExecStart = "${cfg.package}/bin/${bin}";
+        ExecStart = "${lib.getExe cfg.package} ${service}";
         EnvironmentFile = lib.optional (environmentFile != null) environmentFile;
       };
     };
@@ -101,7 +102,7 @@ in
       bucket = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        description = "Bucket for the parquet history. The s3-worker runs only when it is set.";
+        description = "Bucket for the parquet history. The s3 service runs only when it is set.";
       };
       endpoint = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -154,26 +155,26 @@ in
     systemd.services = {
       octoflow-webhook = mkService {
         description = "octoflow webhook receiver";
-        bin = "webhook-receiver";
+        service = "webhook";
         environment.WEBHOOK_LISTEN_ADDR = cfg.webhook.listen;
         inherit (cfg.webhook) environmentFile;
       };
 
       octoflow-dispatcher = mkService {
         description = "octoflow event dispatcher";
-        bin = "event-dispatcher";
+        service = "dispatcher";
       };
 
       octoflow-sse = mkService {
         description = "octoflow SSE server";
-        bin = "sse-server";
+        service = "sse";
         environment.SSE_LISTEN_ADDR = cfg.sse.listen;
       };
     }
     // lib.optionalAttrs (cfg.s3.bucket != null) {
       octoflow-s3 = mkService {
         description = "octoflow S3 parquet writer";
-        bin = "s3-worker";
+        service = "s3";
         environment = {
           S3_BUCKET = cfg.s3.bucket;
           AWS_REGION = cfg.s3.region;
@@ -186,7 +187,7 @@ in
     // lib.optionalAttrs (cfg.publicIngest.repos != [ ]) {
       octoflow-public-ingest = mkService {
         description = "octoflow Events API and GH Archive ingest";
-        bin = "public-ingest";
+        service = "public-ingest";
         environment.PUBLIC_REPOS = lib.concatStringsSep "," cfg.publicIngest.repos;
         inherit (cfg.publicIngest) environmentFile;
       };
