@@ -1,143 +1,62 @@
-# Octoflow Examples
+# Examples
 
-This directory contains example consumers that demonstrate how to build applications using Octoflow events.
+Two small consumers. They build with the rest of the module, so
+`go build ./...` and `go vet ./...` keep them honest.
 
-## Available Examples
+## pr-monitor
 
-### PR Monitor (`pr-monitor.go`)
+Prints the pull request activity of one repository.
 
-Monitors pull request activity for a specific repository.
-
-**Features:**
-- Tracks PR lifecycle (opened, closed, merged, reopened)
-- Shows review status (approved, changes requested)
-- Displays PR comments and updates
-- Uses durable subscription for reliability
-
-**Usage:**
 ```bash
-export REPO_ID=12345678  # Your repository ID
-export NATS_URL=nats://localhost:4222
-go run pr-monitor.go
+REPO_ID=4542716 NATS_URL=nats://localhost:4222 go run ./examples/pr-monitor
 ```
 
-### Security Monitor (`security-monitor.go`)
+## security-monitor
 
-Monitors security-relevant events across your organization.
+Prints the events of one organization that change who can see or change
+what: repositories made public or transferred, collaborators and teams
+added or removed, security, secret scanning, code scanning and
+dependabot alerts.
 
-**Features:**
-- Alerts on repository visibility changes
-- Tracks member additions/removals
-- Monitors team permission changes
-- Detects security advisories and scanning alerts
-- Identifies suspicious activity patterns
-
-**Usage:**
 ```bash
-export ORG_ID=12345678  # Your organization ID
-export NATS_URL=nats://localhost:4222
-go run security-monitor.go
+ORG_ID=487568 NATS_URL=nats://localhost:4222 go run ./examples/security-monitor
 ```
 
-## Building Your Own Consumer
-
-### Basic Pattern
+## Writing a consumer
 
 ```go
-// 1. Connect to NATS
-nc, err := nats.Connect("nats://localhost:4222")
-js, err := nc.JetStream()
+nc, _ := nats.Connect("nats://localhost:4222")
+js, _ := nc.JetStream()
 
-// 2. Subscribe to events
-subject := "github.events.repo.*.push"
-sub, err := js.Subscribe(subject, handleEvent,
-    nats.Durable("my-consumer"),  // Survive restarts
-    nats.DeliverNew(),            // Only new events
-)
-
-// 3. Process events
-func handleEvent(msg *nats.Msg) {
-    var event events.GitHubEvent
-    json.Unmarshal(msg.Data, &event)
-    
-    // Your logic here
-    
-    msg.Ack() // Always acknowledge
-}
-```
-
-### Subscription Patterns
-
-```go
-// Organization-wide
-"github.events.org.12345678.>"
-
-// Specific repository
-"github.events.repo.87654321.>"
-
-// All pushes across repos
-"github.events.repo.*.push"
-
-// Specific user activity
-"github.events.user.11111111.*"
-
-// PR tracking
-"github.events.pr.87654321.456"
-```
-
-### Error Handling
-
-```go
-func handleEvent(msg *nats.Msg) {
-    defer func() {
-        if r := recover(); r != nil {
-            log.Printf("Panic recovered: %v", r)
-            msg.Nak() // Retry later
-        }
-    }()
-    
+_, _ = js.Subscribe("github.events.repo.*.push", func(msg *nats.Msg) {
     var event events.GitHubEvent
     if err := json.Unmarshal(msg.Data, &event); err != nil {
-        log.Printf("Invalid event: %v", err)
-        msg.Term() // Don't retry bad messages
+        _ = msg.Term() // not retryable
         return
     }
-    
-    if err := processEvent(&event); err != nil {
-        log.Printf("Processing failed: %v", err)
-        msg.Nak() // Retry
-        return
-    }
-    
-    msg.Ack() // Success
-}
+    // event.Event, event.Action, event.Repository, event.Sender and the
+    // numeric ids are parsed; event.Payload is the raw GitHub payload.
+    _ = msg.Ack()
+}, nats.Durable("my-consumer"), nats.DeliverNew())
 ```
 
-### Consumer Groups
+Subjects to subscribe to, all with numeric ids:
 
-For scaling, use the same durable name across instances:
+| Subject | Delivers |
+|---|---|
+| `github.events.org.{org_id}.>` | every event of the organization, once |
+| `github.events.global.{type}` | events without an organization |
+| `github.events.repo.{repo_id}.{type}` or `.>` | one repository |
+| `github.events.user.{user_id}.*` | every event involving a user |
+| `github.events.pr.{repo_id}.*` | all pull requests of a repository, one copy per event |
+| `github.events.pr.{repo_id}.{number}` | one pull request |
+| `github.events.pr.{repo_id}.{number}.{type}` | one pull request, one event type |
+| `github.events.issue.{repo_id}.*` and `.{number}[.{type}]` | the same for issues |
 
-```go
-// Instance 1
-js.Subscribe(subject, handler, nats.Durable("processor"))
+`pr.{repo_id}.>` matches both the `{number}` and the `{number}.{type}`
+copies, so it delivers every event twice. Use `*` for "all pull
+requests".
 
-// Instance 2 (different process/machine)
-js.Subscribe(subject, handler, nats.Durable("processor"))
-
-// NATS will load balance between them
-```
-
-## Tips
-
-1. **Use Durable Subscriptions**: Survive restarts and don't lose events
-2. **Handle Errors Gracefully**: Use Nak() for retriable errors, Term() for bad data
-3. **Add Monitoring**: Track processing time and error rates
-4. **Test with Replay**: Use NATS replay to test with historical events
-5. **Start Simple**: Begin with logging, then add your business logic
-
-## More Examples
-
-For more complex examples, see:
-- CI/CD integration in the Getting Started guide
-- Real-time dashboards using SSE
-- S3 query examples for historical analysis
+The same durable name on several instances makes NATS share the work
+between them. Nak a message to see it again, Term it when retrying
+cannot help.
