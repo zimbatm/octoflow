@@ -36,14 +36,13 @@ func TestSubjects(t *testing.T) {
 				"p.user.1.pull_request",
 				"p.user.2.pull_request",
 				"p.pr.7.42.pull_request",
-				"p.pr.7.42",
 			},
 		},
 		{
 			name:     "issue",
 			event:    &events.GitHubEvent{Event: "issues"},
 			entities: &events.EventEntities{RepositoryID: "7", IssueNumber: 3},
-			want:     []string{"p.repo.7.issues", "p.issue.7.3.issues", "p.issue.7.3"},
+			want:     []string{"p.repo.7.issues", "p.issue.7.3.issues"},
 		},
 		{
 			name:     "pr number without repository is not routable",
@@ -104,8 +103,8 @@ func TestDispatchGivesEachCopyItsOwnID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 4 || len(rec.calls) != 4 {
-		t.Fatalf("published %d/%d subjects, want 4", n, len(rec.calls))
+	if n != 3 || len(rec.calls) != 3 {
+		t.Fatalf("published %d/%d subjects, want 3", n, len(rec.calls))
 	}
 	seen := map[string]bool{}
 	for _, c := range rec.calls {
@@ -167,7 +166,7 @@ func TestDispatchStoresCopiesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.State.Msgs != 5 {
-		t.Errorf("stream holds %d messages, want 1 primary + 4 copies; a second dispatch must add none", info.State.Msgs)
+	if info.State.Msgs != 4 {
+		t.Errorf("stream holds %d messages, want 1 primary + 3 copies; a second dispatch must add none", info.State.Msgs)
 	}
 }

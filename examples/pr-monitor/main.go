@@ -53,9 +53,8 @@ func main() {
 		log.Fatalf("jetstream: %v", err)
 	}
 
-	// pr.{repo}.{number} carries one copy per event; pr.{repo}.{number}.{type}
-	// carries another, so pr.{repo}.> would print everything twice.
-	subject := fmt.Sprintf("github.events.pr.%s.*", repoID)
+	// pr.{repo}.{number}.{type}: * in the last position takes every type.
+	subject := fmt.Sprintf("github.events.pr.%s.*.*", repoID)
 	sub, err := js.Subscribe(subject, handle, nats.Durable("pr-monitor"), nats.DeliverNew())
 	if err != nil {
 		log.Fatalf("subscribe: %v", err)

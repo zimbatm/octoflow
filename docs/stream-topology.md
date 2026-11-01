@@ -26,9 +26,7 @@ Event Dispatcher (extracts entities, parallel routing)
       ├── github.events.repo.{repo_id}.{event_type}
       ├── github.events.user.{user_id}.{event_type}  
       ├── github.events.pr.{repo_id}.{pr_number}.{event_type}
-      ├── github.events.pr.{repo_id}.{pr_number}
-      ├── github.events.issue.{repo_id}.{issue_number}.{event_type}
-      └── github.events.issue.{repo_id}.{issue_number}
+      └── github.events.issue.{repo_id}.{issue_number}.{event_type}
 ```
 
 ## NATS JetStream Configuration
@@ -38,8 +36,8 @@ Event Dispatcher (extracts entities, parallel routing)
 | Setting | Value | Purpose |
 |---------|-------|----------|
 | Subjects | `github.events.>` | Flexible depth for all routing patterns |
-| Deduplication | 24-hour window | Prevents duplicate events using GitHub delivery ID |
-| Retention | Configurable (default 24h) | How long to keep events in stream |
+| Deduplication | 24-hour window | By message id: the delivery id, or `<delivery id>@<subject>` for a copy |
+| Retention | Configurable (default 7 days) | Each event is stored once per subject it is routed to |
 | Storage | File-based | Persistent storage for reliability |
 | Replicas | Configurable | High availability in production |
 | Max Consumers | Unlimited | Multiple applications can consume |
@@ -75,15 +73,15 @@ The dispatcher extracts entities and publishes to multiple subjects:
 | Pattern | Example | Description |
 |---------|---------|-------------|
 | `github.events.pr.{repo_id}.{pr_number}.{event_type}` | `github.events.pr.87654321.456.pull_request_review` | Specific PR event |
-| `github.events.pr.{repo_id}.{pr_number}` | `github.events.pr.87654321.456` | All events for PR |
-| `github.events.pr.{repo_id}.*` | `github.events.pr.87654321.*` | All PRs in repository, one copy per event |
+| `github.events.pr.{repo_id}.{pr_number}.*` | `github.events.pr.87654321.456.*` | All events for PR |
+| `github.events.pr.{repo_id}.*.*` | `github.events.pr.87654321.*.*` | All PRs in repository |
 
 #### Issue Events
 | Pattern | Example | Description |
 |---------|---------|-------------|
 | `github.events.issue.{repo_id}.{issue_number}.{event_type}` | `github.events.issue.87654321.123.issue_comment` | Specific issue event |
-| `github.events.issue.{repo_id}.{issue_number}` | `github.events.issue.87654321.123` | All events for issue |
-| `github.events.issue.{repo_id}.>` | `github.events.issue.87654321.>` | All issues in repository |
+| `github.events.issue.{repo_id}.{issue_number}.*` | `github.events.issue.87654321.123.*` | All events for issue |
+| `github.events.issue.{repo_id}.*.*` | `github.events.issue.87654321.*.*` | All issues in repository |
 
 ## Subscription Patterns
 
@@ -119,13 +117,13 @@ nats sub "github.events.user.11111111.pull_request"
 **PR/Issue tracking**
 ```bash
 # Watch PR #456
-nats sub "github.events.pr.87654321.456"
+nats sub "github.events.pr.87654321.456.*"
 
 # All PRs in repo
-nats sub "github.events.pr.87654321.*"
+nats sub "github.events.pr.87654321.*.*"
 
 # Issue #123 updates
-nats sub "github.events.issue.87654321.123"
+nats sub "github.events.issue.87654321.123.*"
 ```
 
 ### By Event Type
@@ -150,9 +148,9 @@ nats sub "github.events.repo.87654321.push" \
          "github.events.repo.87654321.release"
 
 # All PR events across multiple repos
-nats sub "github.events.pr.87654321.*" \
-         "github.events.pr.87654322.>" \
-         "github.events.pr.87654323.>"
+nats sub "github.events.pr.87654321.*.*" \
+         "github.events.pr.87654322.*.*" \
+         "github.events.pr.87654323.*.*"
 ```
 
 ## Design Benefits
@@ -208,14 +206,13 @@ github.events.org.12345678.pull_request
 github.events.repo.87654321.pull_request
 github.events.user.11111111.pull_request  
 github.events.pr.87654321.456.pull_request
-github.events.pr.87654321.456
 ```
 
 ### 4. Consumers receive based on subscription
 - **Org admin** subscribing to `org.12345678.>` sees it
 - **Repo CI** subscribing to `repo.87654321.pull_request` triggers build
 - **User dashboard** subscribing to `user.11111111.*` shows activity
-- **PR bot** subscribing to `pr.87654321.456` starts processing
+- **PR bot** subscribing to `pr.87654321.456.*` starts processing
 
 ## Wildcard Reference
 

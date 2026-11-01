@@ -22,8 +22,9 @@ type Publisher interface {
 }
 
 // Subjects lists where an event is republished: its repository, every
-// involved user, and its pull request or issue, the latter two with and
-// without the event type.
+// involved user, and its pull request or issue. Every copy ends in the
+// event type, so one pull request is pr.{repo}.{n}.* and all pull requests
+// of a repository pr.{repo}.*.*; each event is stored once per subject.
 func Subjects(prefix string, event *events.GitHubEvent, entities *events.EventEntities) []string {
 	var subjects []string
 
@@ -34,14 +35,10 @@ func Subjects(prefix string, event *events.GitHubEvent, entities *events.EventEn
 		subjects = append(subjects, fmt.Sprintf("%s.user.%s.%s", prefix, userID, event.Event))
 	}
 	if entities.PRNumber > 0 && entities.RepositoryID != "" {
-		subjects = append(subjects,
-			fmt.Sprintf("%s.pr.%s.%d.%s", prefix, entities.RepositoryID, entities.PRNumber, event.Event),
-			fmt.Sprintf("%s.pr.%s.%d", prefix, entities.RepositoryID, entities.PRNumber))
+		subjects = append(subjects, fmt.Sprintf("%s.pr.%s.%d.%s", prefix, entities.RepositoryID, entities.PRNumber, event.Event))
 	}
 	if entities.IssueNumber > 0 && entities.RepositoryID != "" {
-		subjects = append(subjects,
-			fmt.Sprintf("%s.issue.%s.%d.%s", prefix, entities.RepositoryID, entities.IssueNumber, event.Event),
-			fmt.Sprintf("%s.issue.%s.%d", prefix, entities.RepositoryID, entities.IssueNumber))
+		subjects = append(subjects, fmt.Sprintf("%s.issue.%s.%d.%s", prefix, entities.RepositoryID, entities.IssueNumber, event.Event))
 	}
 	return subjects
 }

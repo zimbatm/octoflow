@@ -48,14 +48,13 @@ Subjects to subscribe to, all with numeric ids:
 | `github.events.global.{type}` | events without an organization |
 | `github.events.repo.{repo_id}.{type}` or `.>` | one repository |
 | `github.events.user.{user_id}.*` | every event involving a user |
-| `github.events.pr.{repo_id}.*` | all pull requests of a repository, one copy per event |
-| `github.events.pr.{repo_id}.{number}` | one pull request |
+| `github.events.pr.{repo_id}.*.*` | all pull requests of a repository |
+| `github.events.pr.{repo_id}.{number}.*` | one pull request |
 | `github.events.pr.{repo_id}.{number}.{type}` | one pull request, one event type |
-| `github.events.issue.{repo_id}.*` and `.{number}[.{type}]` | the same for issues |
+| `github.events.issue.{repo_id}.*.*` and `.{number}.*` | the same for issues |
 
-`pr.{repo_id}.>` matches both the `{number}` and the `{number}.{type}`
-copies, so it delivers every event twice. Use `*` for "all pull
-requests".
+Every fan-out subject ends in the event type, so a wildcard `*` in that
+position selects all types.
 
 The same durable name on several instances makes NATS share the work
 between them. Nak a message to see it again, Term it when retrying
