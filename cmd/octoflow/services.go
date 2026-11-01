@@ -16,6 +16,7 @@ import (
 	"github.com/zimbatm/octoflow/internal/config"
 	"github.com/zimbatm/octoflow/internal/dispatch"
 	"github.com/zimbatm/octoflow/internal/ghevents"
+	"github.com/zimbatm/octoflow/internal/metrics"
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
 	"github.com/zimbatm/octoflow/internal/publicingest"
 	"github.com/zimbatm/octoflow/internal/sse"
@@ -52,11 +53,14 @@ func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamCon
 		_, err := dispatch.Dispatch(ctx, publisher, cfg.NATS.SubjectPrefix, msg.Data)
 		switch {
 		case errors.Is(err, dispatch.ErrUndecodable):
+			metrics.DispatchedEvents.WithLabelValues("undecodable").Inc()
 			terminate(msg, "Dropping undecodable message", err)
 		case err != nil:
+			metrics.DispatchedEvents.WithLabelValues("error").Inc()
 			slog.Error("Error dispatching message", "subject", msg.Subject, "error", err)
 			natsInternal.AckOrNak(msg, err)
 		default:
+			metrics.DispatchedEvents.WithLabelValues("ok").Inc()
 			natsInternal.AckOrNak(msg, nil)
 		}
 	})

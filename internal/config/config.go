@@ -18,6 +18,8 @@ type Config struct {
 	Dashboard    DashboardConfig
 	PublicIngest PublicIngestConfig
 	Processing   ProcessingConfig
+	Log          LogConfig
+	Metrics      MetricsConfig
 }
 
 type WebhookConfig struct {
@@ -31,7 +33,18 @@ type WebhookConfig struct {
 	// empty allows every organization
 	AllowedOrgs []string
 	HealthPath  string
-	MetricsPath string
+}
+
+type LogConfig struct {
+	// text or json
+	Format string
+	// debug, info, warn or error
+	Level string
+}
+
+type MetricsConfig struct {
+	// address of the Prometheus listener; empty disables it
+	ListenAddr string
 }
 
 type NATSConfig struct {
@@ -113,7 +126,6 @@ func LoadFromEnv() (*Config, error) {
 			RequestTimeout: 10 * time.Second,
 			AllowedOrgs:    splitList(os.Getenv("WEBHOOK_ALLOWED_ORGS")),
 			HealthPath:     "/health",
-			MetricsPath:    "/metrics",
 		},
 		NATS: NATSConfig{
 			Servers:           []string{getEnvOrDefault("NATS_URL", "nats://localhost:4222")},
@@ -160,6 +172,24 @@ func LoadFromEnv() (*Config, error) {
 		Processing: ProcessingConfig{
 			NumWorkers: 10,
 		},
+		Log: LogConfig{
+			Format: getEnvOrDefault("LOG_FORMAT", "text"),
+			Level:  getEnvOrDefault("LOG_LEVEL", "info"),
+		},
+		Metrics: MetricsConfig{
+			ListenAddr: os.Getenv("METRICS_LISTEN_ADDR"),
+		},
+	}
+
+	switch cfg.Log.Format {
+	case "text", "json":
+	default:
+		return nil, fmt.Errorf("LOG_FORMAT must be text or json, got %q", cfg.Log.Format)
+	}
+	switch cfg.Log.Level {
+	case "debug", "info", "warn", "error":
+	default:
+		return nil, fmt.Errorf("LOG_LEVEL must be debug, info, warn or error, got %q", cfg.Log.Level)
 	}
 
 	if s := os.Getenv("NATS_STREAM_REPLICAS"); s != "" {

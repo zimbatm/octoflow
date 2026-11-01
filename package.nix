@@ -1,7 +1,11 @@
 { pkgs, ... }:
+let
+  version = "0.1.0";
+in
 pkgs.buildGoModule {
   pname = "octoflow";
-  version = "0.1.0";
+  inherit version;
+  ldflags = [ "-X main.version=${version}" ];
   src = pkgs.lib.fileset.toSource {
     root = ./.;
     fileset = pkgs.lib.fileset.unions [

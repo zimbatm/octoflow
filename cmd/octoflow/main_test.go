@@ -7,13 +7,7 @@ import (
 	"github.com/zimbatm/octoflow/internal/config"
 )
 
-func names(ss []service) string {
-	var out []string
-	for _, s := range ss {
-		out = append(out, s.name)
-	}
-	return strings.Join(out, " ")
-}
+func joined(ss []service) string { return strings.Join(names(ss), " ") }
 
 func TestPick(t *testing.T) {
 	cfg := &config.Config{}
@@ -21,20 +15,20 @@ func TestPick(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if names(got) != "webhook dispatcher sse dashboard" {
-		t.Errorf("all without S3 or public repos = %q", names(got))
+	if joined(got) != "webhook dispatcher sse dashboard" {
+		t.Errorf("all without S3 or public repos = %q", joined(got))
 	}
 
 	cfg.S3.Bucket = "b"
 	cfg.PublicIngest.Repos = []string{"NixOS/nixpkgs"}
 	got, _ = pick("all", cfg)
-	if names(got) != "webhook dispatcher s3 sse dashboard public-ingest" {
-		t.Errorf("all with S3 and public repos = %q", names(got))
+	if joined(got) != "webhook dispatcher s3 sse dashboard public-ingest" {
+		t.Errorf("all with S3 and public repos = %q", joined(got))
 	}
 
 	got, err = pick("s3", cfg)
-	if err != nil || names(got) != "s3" {
-		t.Errorf("s3 = %q, %v", names(got), err)
+	if err != nil || joined(got) != "s3" {
+		t.Errorf("s3 = %q, %v", joined(got), err)
 	}
 	if _, err := pick("nope", cfg); err == nil {
 		t.Error("unknown service must be an error")

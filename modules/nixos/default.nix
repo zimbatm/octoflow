@@ -46,7 +46,12 @@ let
       wants = [ "network-online.target" ];
       after = [ "network-online.target" ] ++ lib.optional cfg.nats.enable "nats.service";
       requires = lib.optional cfg.nats.enable "nats.service";
-      environment = common // environment;
+      environment =
+        common
+        // lib.optionalAttrs (cfg.metricsListen.${service} or "" != "") {
+          METRICS_LISTEN_ADDR = cfg.metricsListen.${service};
+        }
+        // environment;
       serviceConfig = hardening // {
         ExecStart = "${lib.getExe cfg.package} ${service}";
         EnvironmentFile = lib.optional (environmentFile != null) environmentFile;
@@ -72,6 +77,18 @@ in
       type = lib.types.bool;
       default = true;
       description = "Run a local NATS server with JetStream, bound to 127.0.0.1.";
+    };
+
+    metricsListen = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = {
+        webhook = "127.0.0.1:9180";
+        dispatcher = "127.0.0.1:9181";
+        sse = "127.0.0.1:9182";
+        s3 = "127.0.0.1:9183";
+        public-ingest = "127.0.0.1:9184";
+      };
+      description = "Prometheus /metrics address per service; an empty string disables it.";
     };
 
     domain = lib.mkOption {

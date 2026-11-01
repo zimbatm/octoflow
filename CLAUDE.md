@@ -94,6 +94,8 @@ NATS_USERNAME / NATS_PASSWORD / NATS_TOKEN / NATS_NKEY_SEED
 NATS_STREAM_REPLICAS=1
 PUBLIC_REPOS=NixOS/nixpkgs    # public-ingest only; GITHUB_TOKEN, EVENTS_API_INTERVAL, GHARCHIVE_START
 DASHBOARD_LISTEN_ADDR=:8082   # WEB_DIR=./web
+METRICS_LISTEN_ADDR=:9180     # Prometheus /metrics and /healthz; unset disables
+LOG_FORMAT=text               # or json; LOG_LEVEL=debug|info|warn|error
 ```
 
 See `.env.example`; `nix develop` loads `.env` when it exists.

@@ -15,6 +15,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/zimbatm/octoflow/internal/config"
+	"github.com/zimbatm/octoflow/internal/metrics"
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
@@ -187,6 +188,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID str
 			}
 
 			client.EventCount.Add(1)
+			metrics.SSEEventsSent.WithLabelValues(routeKind(streamID)).Inc()
 		}
 	}
 }
@@ -314,6 +316,7 @@ func (h *Handler) registerClient(client *ClientConnection) {
 	h.clientMutex.Lock()
 	defer h.clientMutex.Unlock()
 	h.clients[client.ID] = client
+	metrics.SSEClients.Set(float64(len(h.clients)))
 	slog.Info("SSE client connected",
 		"client_id", client.ID,
 		"stream_id", client.StreamID,
@@ -333,7 +336,17 @@ func (h *Handler) unregisterClient(clientID string) {
 			"duration", duration,
 			"event_count", client.EventCount.Load())
 		delete(h.clients, clientID)
+		metrics.SSEClients.Set(float64(len(h.clients)))
 	}
+}
+
+// routeKind is the metric label for a stream id such as org-222: the part
+// before the first dash, so ids never become label values.
+func routeKind(streamID string) string {
+	if i := strings.IndexByte(streamID, '-'); i >= 0 {
+		return streamID[:i]
+	}
+	return streamID
 }
 
 // GetStats returns current connection statistics

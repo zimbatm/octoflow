@@ -350,8 +350,8 @@ S3 worker stores every event.
 
 ## Monitoring
 
-- Health checks: `/health` on ports 8080 and 8081
-- Metrics: `/metrics` on webhook receiver
+- Health checks: `/health` on the webhook and SSE ports, `/healthz` on the metrics port
+- Metrics: Prometheus on `METRICS_LISTEN_ADDR` (`/metrics`), one listener per process: webhook requests, publishes, dispatched events, S3 batches, SSE clients and events, public-ingest polls, stream size
 - NATS monitoring: http://localhost:8222
 
 ## Production Deployment

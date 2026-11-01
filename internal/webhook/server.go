@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/zimbatm/octoflow/internal/config"
 )
 
@@ -14,40 +13,28 @@ func NewServer(cfg *config.WebhookConfig, publisher Publisher) *http.Server {
 	handler := NewHandler(cfg, publisher)
 
 	mux := http.NewServeMux()
-
-	// Root handler with helpful information
 	mux.HandleFunc("/", rootHandler)
-
-	// Webhook endpoint
 	mux.HandleFunc("/webhook", handler.ServeHTTP)
-
-	// Health check endpoint
 	mux.HandleFunc(cfg.HealthPath, healthHandler)
 
-	// Metrics endpoint with Prometheus
-	if cfg.MetricsPath != "" {
-		mux.Handle(cfg.MetricsPath, promhttp.Handler())
-	}
-
 	return &http.Server{
-		Addr:        cfg.ListenAddr,
-		Handler:     mux,
-		ReadTimeout: cfg.RequestTimeout,
+		Addr:              cfg.ListenAddr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		// a 25 MB payload on a slow link needs longer than the publish timeout.
+		ReadTimeout: time.Minute,
 		// leave room to write the 503 after a publish times out.
-		WriteTimeout: cfg.RequestTimeout + 5*time.Second,
+		WriteTimeout: time.Minute + cfg.RequestTimeout + 5*time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 }
 
-// rootHandler provides helpful information about the webhook service
+// rootHandler tells a browser what this endpoint is and how to configure GitHub.
 func rootHandler(w http.ResponseWriter, r *http.Request) {
-	// Only handle exact root path
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-
-	// Only accept GET requests
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, `{"error":"Method not allowed. POST requests should go to /webhook","webhook_endpoint":"/webhook"}`)
 		return
@@ -55,25 +42,22 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, `{
   "service": "octoflow-webhook-receiver",
-  "version": "1.0.0",
-  "description": "GitHub webhook receiver for Octoflow event processing system",
+  "description": "GitHub webhook receiver for the octoflow event pipeline",
   "endpoints": {
     "/": "This help message",
     "/webhook": "GitHub webhook endpoint (POST)",
-    "/health": "Health check endpoint (GET)",
-    "/metrics": "Prometheus metrics endpoint (GET)"
+    "/health": "Health check endpoint (GET)"
   },
   "github_setup": {
     "payload_url": "https://your-domain.com/webhook",
     "content_type": "application/json",
-    "secret": "Your webhook secret (optional but recommended)",
+    "secret": "Your webhook secret",
     "events": "Send me everything or select specific events"
   },
   "documentation": "https://github.com/zimbatm/octoflow"
 }`)
 }
 
-// healthHandler handles health check requests
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, `{"status":"healthy","service":"webhook-receiver"}`)
 }

@@ -86,6 +86,19 @@ pkgs.testers.runNixOSTest {
         ).strip()
         assert out == "1", f"{route}: {out} events"
 
+    with subtest("every service exposes metrics; the dispatcher counted the event"):
+      machine.wait_until_succeeds(
+        "curl -sf http://127.0.0.1:9181/metrics | grep -q 'octoflow_dispatched_events_total{status=\"ok\"} 1'",
+        timeout=30,
+      )
+      machine.succeed("curl -sf http://127.0.0.1:9180/metrics | grep -q 'octoflow_webhook_requests_total{event_type=\"pull_request\",organization=\"numtide\",status=\"success\"} 2'")
+      machine.succeed("curl -sf http://127.0.0.1:9182/metrics | grep -q 'octoflow_sse_events_sent_total{route=\"org\"} 1'")
+      machine.succeed("curl -sf http://127.0.0.1:9183/healthz")
+      machine.wait_until_succeeds(
+        "curl -sf http://127.0.0.1:9181/metrics | grep -q '^octoflow_stream_messages [1-9]'",
+        timeout=60,
+      )
+
     with subtest("the s3-worker writes the batch when it stops"):
       machine.succeed("systemctl stop octoflow-s3")
       machine.succeed("journalctl -u octoflow-s3 | grep 'Uploaded batch to S3 event_count=1'")
