@@ -56,10 +56,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID str
 	// Get Last-Event-ID header for resumption
 	lastEventID := r.Header.Get("Last-Event-ID")
 
-	// Get last N messages parameter (default 50)
+	// ?last=N replays the last N matching events first; 0 means none.
 	lastCount := 50
 	if lastParam := r.URL.Query().Get("last"); lastParam != "" {
-		if n, err := strconv.Atoi(lastParam); err == nil && n > 0 {
+		if n, err := strconv.Atoi(lastParam); err == nil && n >= 0 {
 			lastCount = n
 		}
 	}
