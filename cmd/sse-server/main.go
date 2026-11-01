@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -65,7 +66,7 @@ func main() {
 
 	// Start server in background
 	go func() {
-		fmt.Printf("Starting SSE server on %s\n", cfg.SSE.ListenAddr)
+		slog.Info("Starting SSE server", "address", cfg.SSE.ListenAddr)
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("HTTP server error: %v", err)
 		}
@@ -77,15 +78,15 @@ func main() {
 	<-sigCh
 
 	// Graceful shutdown
-	fmt.Println("\nStarting graceful shutdown...")
+	slog.Info("Starting graceful shutdown")
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Error shutting down HTTP server: %v", err)
+		slog.Error("Error shutting down HTTP server", "error", err)
 	}
 
-	fmt.Println("Shutdown complete")
+	slog.Info("Shutdown complete")
 }
 
 // createRouter creates the HTTP router with SSE endpoints
