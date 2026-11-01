@@ -95,7 +95,7 @@ S3_ENDPOINT=http://...        # R2, rustfs; unset for AWS
 AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   # unset keys: AWS credential chain
 NATS_URL=nats://localhost:4222
 NATS_USERNAME / NATS_PASSWORD / NATS_TOKEN / NATS_NKEY_SEED
-NATS_STREAM_REPLICAS=1
+NATS_STREAM_REPLICAS=1        # NATS_STREAM_MAX_BYTES=10GiB caps the stream, default none
 PUBLIC_REPOS=NixOS/nixpkgs    # public-ingest only; GITHUB_TOKEN, EVENTS_API_INTERVAL, GHARCHIVE_START
 DASHBOARD_LISTEN_ADDR=:8082   # WEB_DIR=./web
 METRICS_LISTEN_ADDR=:9180     # Prometheus /metrics and /healthz; unset disables

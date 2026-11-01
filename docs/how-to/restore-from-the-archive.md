@@ -20,7 +20,7 @@ octoflow restore --from 2026-10-01 --to 2026-10-14 --dry-run
 ```
 
 ```
-restore: files=312 rows=48112 matched=48112 published=0 duplicates=0
+restore: files=312 rows=48112 matched=48112 in_stream=0 published=0 duplicates=0
 ```
 
 `--from` and `--to` are UTC dates, inclusive, matched against each
@@ -42,14 +42,17 @@ octoflow restore --from 2026-10-01 --to 2026-10-14
 ```
 
 ```
-restore: files=312 rows=48112 matched=48112 published=47990 duplicates=122
+restore: files=312 rows=48112 matched=48112 in_stream=1204 published=46786 duplicates=122
 ```
 
-Events the stream still holds, that is, events received within the
-stream's 24 hour duplicate window, are dropped by the stream and counted
-as duplicates. Running the same restore twice is therefore harmless as
-long as the first run is less than 24 hours old; after that the stream
-stores the events again.
+The command reads the oldest event the stream still holds and skips
+every archived event received at or after it, counted as `in_stream`:
+the stream keeps events for seven days but only remembers their ids for
+24 hours, so republishing them would store them twice. Events the
+stream dropped since are republished; events inside the 24 hour window
+are dropped by the stream and counted as `duplicates`. `--force` turns
+the skip off, for a stream that lost part of its range. A dry run does
+not connect to NATS and reports `in_stream=0`.
 
 Order within a file is preserved and files are read in name order, so
 events come back in the order they were archived. The command stops at

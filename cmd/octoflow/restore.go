@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -11,10 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/zimbatm/octoflow/internal/config"
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
 	"github.com/zimbatm/octoflow/internal/restore"
 	"github.com/zimbatm/octoflow/internal/storage"
+	"github.com/zimbatm/octoflow/pkg/events"
 )
 
 // runRestore is the restore subcommand. It returns the exit status.
@@ -26,6 +29,7 @@ func runRestore(args []string) int {
 	repo := fs.String("repo", "", "restore only this repository id")
 	org := fs.String("org", "", "restore only this organization id")
 	dryRun := fs.Bool("dry-run", false, "read the archive and count, publish nothing")
+	force := fs.Bool("force", false, "also publish events the stream still holds; past the 24 hour duplicate window they are stored twice")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -80,16 +84,44 @@ func runRestore(args []string) int {
 		}
 		defer nc.Close()
 		pub = natsInternal.NewPublisher(js, &cfg.NATS)
+		if !*force {
+			if opts.Before, err = oldestInStream(js, cfg.NATS.StreamName); err != nil {
+				fatal("Failed to read the stream", err)
+			}
+		}
 	}
 
 	slog.Info("Restoring from the archive", "bucket", cfg.S3.Bucket, "prefix", opts.KeyPrefix,
-		"from", opts.From.Format(time.DateOnly), "to", opts.To.Format(time.DateOnly), "dry_run", *dryRun)
+		"from", opts.From.Format(time.DateOnly), "to", opts.To.Format(time.DateOnly), "dry_run", *dryRun, "before", opts.Before)
 	st, err := restore.Run(ctx, store, pub, opts)
-	fmt.Printf("restore: files=%d rows=%d matched=%d published=%d duplicates=%d\n",
-		st.Files, st.Rows, st.Matched, st.Published, st.Duplicates)
+	fmt.Printf("restore: files=%d rows=%d matched=%d in_stream=%d published=%d duplicates=%d\n",
+		st.Files, st.Rows, st.Matched, st.InStream, st.Published, st.Duplicates)
 	if err != nil {
 		slog.Error("Restore stopped", "error", err)
 		return 1
 	}
 	return 0
+}
+
+// oldestInStream returns the received_at of the oldest event the stream
+// still holds, or zero for an empty stream. Everything received since
+// then is in the stream, and after the duplicate window the stream would
+// store it a second time.
+func oldestInStream(js nats.JetStreamContext, stream string) (time.Time, error) {
+	info, err := js.StreamInfo(stream)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if info.State.Msgs == 0 {
+		return time.Time{}, nil
+	}
+	msg, err := js.GetMsg(stream, info.State.FirstSeq)
+	if err != nil {
+		return time.Time{}, err
+	}
+	var ev events.GitHubEvent
+	if json.Unmarshal(msg.Data, &ev) != nil || ev.ReceivedAt.IsZero() {
+		return msg.Time, nil
+	}
+	return ev.ReceivedAt, nil
 }

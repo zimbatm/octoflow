@@ -10,7 +10,7 @@
 | `enable` | bool | `false` | |
 | `package` | package | the flake's package | |
 | `natsUrl` | string | `nats://127.0.0.1:4222` | `NATS_URL` of every unit |
-| `nats.enable` | bool | `true` | run `services.nats` with JetStream on 127.0.0.1 |
+| `nats.enable` | bool | `true` | run `services.nats` with JetStream on 127.0.0.1 and `max_payload` 32 MiB |
 | `domain` | string or null | `null` | when set, nginx serves it with ACME: `= /webhook` to the receiver, `/` to the SSE server with buffering off and a 1 h read timeout |
 | `metricsListen` | attrs of string | `webhook = "127.0.0.1:9180"`, `dispatcher = ...9181`, `sse = ...9182`, `s3 = ...9183`, `public-ingest = ...9184` | `METRICS_LISTEN_ADDR` per service; `""` disables one |
 | `webhook.listen` | string | `127.0.0.1:8180` | `WEBHOOK_LISTEN_ADDR` |

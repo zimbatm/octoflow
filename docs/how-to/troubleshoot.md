@@ -26,7 +26,7 @@ Open the delivery in GitHub's "Recent Deliveries" and read the response.
 `WEBHOOK_ALLOW_UNSIGNED=true` for a local setup only.
 
 `Failed to connect to NATS`: `NATS_URL` points nowhere, or NATS has no
-JetStream (`nats-server -js`).
+JetStream (`nats-server -c nats.conf`).
 
 ## Events are stored but a consumer gets nothing
 

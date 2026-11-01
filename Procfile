@@ -1,5 +1,5 @@
 # Start NATS server with JetStream
-nats: nats-server -js -m 8222
+nats: nats-server -c nats.conf
 
 # Local S3 store; the s3 service creates the bucket on start
 s3-store: mkdir -p .data/s3 && RUSTFS_ACCESS_KEY=$AWS_ACCESS_KEY_ID RUSTFS_SECRET_KEY=$AWS_SECRET_ACCESS_KEY exec rustfs server --address 127.0.0.1:9000 .data/s3

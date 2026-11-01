@@ -27,7 +27,7 @@ run:
 	./scripts/start-local.sh
 
 nats-server:
-	nats-server -js
+	nats-server -c nats.conf
 
 clean:
 	go clean

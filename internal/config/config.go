@@ -54,6 +54,8 @@ type NATSConfig struct {
 	StreamName     string
 	StreamReplicas int
 	StreamMaxAge   time.Duration
+	// oldest messages go first once the stream reaches it; 0 is unlimited
+	StreamMaxBytes int64
 
 	MaxReconnects     int
 	ReconnectWait     time.Duration
@@ -116,6 +118,10 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxBytes, err := envParse("NATS_STREAM_MAX_BYTES", int64(0), parseBytes)
+	if err != nil {
+		return nil, err
+	}
 	pollInterval, err := envParse("EVENTS_API_INTERVAL", time.Minute, time.ParseDuration)
 	if err != nil {
 		return nil, err
@@ -150,6 +156,7 @@ func LoadFromEnv() (*Config, error) {
 			StreamName:        getEnvOrDefault("NATS_STREAM_NAME", "GITHUB_EVENTS_RAW"),
 			StreamReplicas:    replicas,
 			StreamMaxAge:      7 * 24 * time.Hour,
+			StreamMaxBytes:    maxBytes,
 			MaxReconnects:     10,
 			ReconnectWait:     2 * time.Second,
 			ConnectionTimeout: 5 * time.Second,
@@ -247,4 +254,21 @@ func (c *S3Config) Validate() error {
 		return errors.New("S3_BUCKET environment variable is required")
 	}
 	return nil
+}
+
+// parseBytes reads a byte count: a bare number, or one with a binary
+// suffix K, M, G or T, optionally followed by B or iB, as in 10GiB.
+func parseBytes(s string) (int64, error) {
+	num := strings.TrimRight(s, "KMGTBi")
+	suffix := strings.TrimSuffix(strings.TrimSuffix(s[len(num):], "B"), "i")
+	shift := map[string]uint{"": 0, "K": 10, "M": 20, "G": 30, "T": 40}
+	n, err := strconv.ParseInt(num, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("not a size: %q", s)
+	}
+	sh, ok := shift[suffix]
+	if !ok || n < 0 {
+		return 0, fmt.Errorf("not a size: %q", s)
+	}
+	return n << sh, nil
 }

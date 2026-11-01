@@ -52,3 +52,17 @@ func TestLoadFromEnvOverrides(t *testing.T) {
 		t.Errorf("Expected S3 config to validate: %v", err)
 	}
 }
+
+func TestParseBytes(t *testing.T) {
+	for in, want := range map[string]int64{"0": 0, "1024": 1024, "10K": 10 << 10, "10KiB": 10 << 10, "2MB": 2 << 20, "10GiB": 10 << 30, "1T": 1 << 40} {
+		got, err := parseBytes(in)
+		if err != nil || got != want {
+			t.Errorf("parseBytes(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "x", "10X", "-1", "1.5G", "GiB"} {
+		if _, err := parseBytes(in); err == nil {
+			t.Errorf("parseBytes(%q) accepted", in)
+		}
+	}
+}

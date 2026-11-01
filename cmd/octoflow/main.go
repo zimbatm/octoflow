@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -91,6 +92,10 @@ func main() {
 		if err != nil {
 			fatal("Failed to connect to NATS", err)
 		}
+		if nc.MaxPayload() < cfg.Webhook.MaxPayloadSize && slices.ContainsFunc(selected, func(s service) bool { return s.name == "webhook" }) {
+			slog.Warn("NATS max_payload is below the webhook payload limit; large deliveries will fail",
+				"nats_max_payload", nc.MaxPayload(), "webhook_max_payload", cfg.Webhook.MaxPayloadSize)
+		}
 		// closed after every service returned: the s3 service acks in its final flush.
 		defer nc.Close()
 		js = j
@@ -132,7 +137,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: octoflow webhook|dispatcher|s3|sse|dashboard|public-ingest|all")
-	fmt.Fprintln(os.Stderr, "       octoflow restore --from YYYY-MM-DD [--to YYYY-MM-DD] [--event a,b] [--repo ID] [--org ID] [--dry-run]")
+	fmt.Fprintln(os.Stderr, "       octoflow restore --from YYYY-MM-DD [--to YYYY-MM-DD] [--event a,b] [--repo ID] [--org ID] [--dry-run] [--force]")
 	fmt.Fprintln(os.Stderr, "       octoflow version")
 	fmt.Fprintln(os.Stderr, "  all runs every service in this process; s3 only with S3_BUCKET, public-ingest only with PUBLIC_REPOS")
 	fmt.Fprintln(os.Stderr, "  restore publishes archived events from S3 back into the stream")

@@ -167,6 +167,8 @@ in
       enable = true;
       jetstream = true;
       settings.host = "127.0.0.1";
+      # the receiver accepts 25 MB deliveries, GitHub's limit; the stored event adds an envelope.
+      settings.max_payload = 32 * 1024 * 1024;
     };
 
     systemd.services = {

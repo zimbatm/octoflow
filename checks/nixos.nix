@@ -11,6 +11,7 @@ pkgs.testers.runNixOSTest {
         pkgs.curl
         pkgs.openssl
         pkgs.natscli
+        pkgs.jq
         flake.packages.${pkgs.stdenv.hostPlatform.system}.default
       ];
 
@@ -90,14 +91,14 @@ pkgs.testers.runNixOSTest {
 
     with subtest("every service exposes metrics; the dispatcher counted the event"):
       machine.wait_until_succeeds(
-        "curl -sf http://127.0.0.1:9181/metrics | grep -q 'octoflow_dispatched_events_total{status=\"ok\"} 1'",
+        "curl -sf http://127.0.0.1:9181/metrics | grep -c 'octoflow_dispatched_events_total{status=\"ok\"} 1'",
         timeout=30,
       )
-      machine.succeed("curl -sf http://127.0.0.1:9180/metrics | grep -q 'octoflow_webhook_requests_total{event_type=\"pull_request\",organization=\"numtide\",status=\"success\"} 2'")
-      machine.succeed("curl -sf http://127.0.0.1:9182/metrics | grep -q 'octoflow_sse_events_sent_total{route=\"org\"} 1'")
+      machine.succeed("curl -sf http://127.0.0.1:9180/metrics | grep -c 'octoflow_webhook_requests_total{event_type=\"pull_request\",organization=\"numtide\",status=\"success\"} 2'")
+      machine.succeed("curl -sf http://127.0.0.1:9182/metrics | grep -c 'octoflow_sse_events_sent_total{route=\"org\"} 1'")
       machine.succeed("curl -sf http://127.0.0.1:9183/healthz")
       machine.wait_until_succeeds(
-        "curl -sf http://127.0.0.1:9181/metrics | grep -q '^octoflow_stream_messages [1-9]'",
+        "curl -sf http://127.0.0.1:9181/metrics | grep -c '^octoflow_stream_messages [1-9]'",
         timeout=60,
       )
 
@@ -123,5 +124,24 @@ pkgs.testers.runNixOSTest {
           timeout=30,
         ).strip()
         assert out == "1", f"{route} after restore: {out} events"
+
+    with subtest("a 2 MiB delivery, above the nats-server default max_payload, is stored"):
+      machine.succeed(
+        "head -c 2097152 /dev/zero | tr '\\0' x > /tmp/pad.txt && "
+        "jq -c --rawfile pad /tmp/pad.txt '. + {padding: $pad}' /tmp/payload.json > /tmp/big.json"
+      )
+      bigsig = machine.succeed("openssl dgst -sha256 -hmac s3cret /tmp/big.json | awk '{print $2}'").strip()
+      code = machine.succeed(
+        "curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8180/webhook "
+        "-H 'Content-Type: application/json' -H 'X-GitHub-Event: push' "
+        f"-H 'X-GitHub-Delivery: vm-big' -H 'X-Hub-Signature-256: sha256={bigsig}' "
+        "--data-binary @/tmp/big.json"
+      ).strip()
+      assert code == "200", f"big delivery: {code}"
+      out = machine.wait_until_succeeds(
+        "timeout 3 curl -sN 'http://127.0.0.1:8181/events/type/push?last=1' | grep -c '^event: push' || true",
+        timeout=30,
+      ).strip()
+      assert out == "1", f"type/push after the 2 MiB delivery: {out} events"
   '';
 }

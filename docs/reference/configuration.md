@@ -24,9 +24,16 @@ answers 503, health on `/health`.
 | `NATS_SUBJECT_PREFIX` | `github.events` | First tokens of every subject. |
 | `NATS_STREAM_NAME` | `GITHUB_EVENTS_RAW` | |
 | `NATS_STREAM_REPLICAS` | `1` | JetStream replicas; needs a cluster above 1. |
+| `NATS_STREAM_MAX_BYTES` | none | Size cap of the stream, for example `10GiB`; the oldest messages are dropped first. A bare number is bytes; `K`, `M`, `G`, `T` are binary suffixes, `iB` or `B` may follow. Must fit in the server's `max_file_store`, or the stream cannot be created. Without it the server limit applies and publishes fail once it is full. |
 | `NATS_USERNAME`, `NATS_PASSWORD` | none | User and password. |
 | `NATS_TOKEN` | none | Token, when no user is set. |
 | `NATS_NKEY_SEED` | none | NKey seed, when neither is set. |
+
+nats-server must accept messages of 32 MiB (`max_payload: 33554432`):
+GitHub sends deliveries up to 25 MB and the stored event adds an
+envelope. The server default is 1 MiB, above which the receiver answers
+503 to every delivery. The NixOS module sets it; the receiver logs a
+warning at startup when the server limit is too low.
 
 Fixed: file storage, 7 days retention, 24 h duplicate window (shortened
 to the retention when that is less), 10 reconnects 2 s apart, 5 s

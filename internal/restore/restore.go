@@ -23,12 +23,15 @@ type Options struct {
 	From, To  time.Time
 	// empty means every event type
 	Events []string
+	// events received at or after Before are skipped and counted as
+	// InStream; zero means none are
+	Before time.Time
 	// empty means every repository or organization
 	RepoID, OrgID string
 }
 
 type Stats struct {
-	Files, Rows, Matched, Published, Duplicates int
+	Files, Rows, Matched, InStream, Published, Duplicates int
 }
 
 // Run reads the archive days From to To plus one, because a file holds
@@ -73,6 +76,10 @@ func Run(ctx context.Context, store storage.ObjectStore, pub Publisher, opts Opt
 			}
 			st.Matched++
 			fileMatched++
+			if !opts.Before.IsZero() && !ev.ReceivedAt.Before(opts.Before) {
+				st.InStream++
+				continue
+			}
 			if pub == nil {
 				continue
 			}

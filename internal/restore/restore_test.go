@@ -202,3 +202,18 @@ func TestRunIntoTheStream(t *testing.T) {
 		t.Errorf("restored message: subject %s, %+v", msg.Subject, restored)
 	}
 }
+
+func TestRunSkipsWhatTheStreamStillHolds(t *testing.T) {
+	s := newStore(t)
+	rec := &recorder{}
+	st, err := Run(context.Background(), s, rec, Options{KeyPrefix: "events", From: at(13, 0), To: at(15, 0), Before: at(14, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(rec.ids, " "); got != "a b c" {
+		t.Errorf("published %q, want only the events received before day 14 01:00", got)
+	}
+	if st.Matched != 5 || st.InStream != 2 || st.Published != 3 {
+		t.Errorf("stats = %+v", st)
+	}
+}

@@ -29,6 +29,7 @@ func EnsureStream(js nats.JetStreamContext, cfg *config.NATSConfig) error {
 		Storage:      nats.FileStorage,
 		Replicas:     cfg.StreamReplicas,
 		MaxAge:       cfg.StreamMaxAge,
+		MaxBytes:     cfg.StreamMaxBytes,
 		MaxConsumers: -1,
 		Discard:      nats.DiscardOld,
 		Retention:    nats.LimitsPolicy,

@@ -74,6 +74,6 @@ NATS connection closes last.
 The archive is the backup of the stream. `octoflow restore` reads the
 Parquet files for a date range and publishes the events again with their
 original ids, so the dispatcher recreates the copies and consumers see
-them as new. Within the duplicate window the stream drops what it still
-has, so a restore can overlap with live data. See [Restore events from
+them as new. It skips what the stream still holds, so it fills the gap
+without duplicating live data. See [Restore events from
 the archive](../how-to/restore-from-the-archive.md).
