@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,8 +18,9 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// maxLast bounds the replay a client can ask for with ?last=.
-const maxLast = 1000
+// maxLast bounds the replay a client can ask for, with ?last= or with an
+// old Last-Event-ID. A variable so tests can lower it.
+var maxLast = 1000
 
 const heartbeatEvery = 30 * time.Second
 
@@ -30,6 +32,10 @@ type Handler struct {
 	// consumer; 0 is unlimited. Beyond it a request gets a 503.
 	MaxClients int
 	clients    atomic.Int64
+	// replay starts found by startSeqForLast, keyed by subjects, count and
+	// stream bounds; a reconnect storm asks the same question many times
+	cacheMu sync.Mutex
+	cache   map[string]uint64
 }
 
 func NewHandler(js nats.JetStreamContext, stream string, maxClients int) *Handler {
@@ -149,10 +155,16 @@ func (h *Handler) subscribe(ctx context.Context, subjects []string, lastEventID 
 	}
 
 	if seq, err := strconv.ParseUint(lastEventID, 10, 64); err == nil {
+		// a reconnect resumes where it left off, but never further back
+		// than the replay cap: an old id would stream the whole stream.
+		floor, err := h.startSeqForLast(ctx, subjects, maxLast)
+		if err != nil {
+			return nil, err
+		}
 		cc.DeliverPolicy = nats.DeliverByStartSequencePolicy
-		cc.OptStartSeq = seq + 1
+		cc.OptStartSeq = max(seq+1, floor)
 	} else if lastCount > 0 {
-		start, err := h.startSeqForLast(subjects, lastCount)
+		start, err := h.startSeqForLast(ctx, subjects, lastCount)
 		if err != nil {
 			return nil, err
 		}
@@ -189,7 +201,7 @@ func (h *Handler) deleteConsumer(name string) {
 // messages matching subjects remain, or 0 if the stream is empty. The
 // stream holds fan-out copies of other subjects in between, so
 // LastSeq-n is wrong for any filter; a binary search on NumPending is not.
-func (h *Handler) startSeqForLast(subjects []string, n int) (uint64, error) {
+func (h *Handler) startSeqForLast(ctx context.Context, subjects []string, n int) (uint64, error) {
 	n = min(n, maxLast)
 	si, err := h.js.StreamInfo(h.stream)
 	if err != nil {
@@ -198,8 +210,32 @@ func (h *Handler) startSeqForLast(subjects []string, n int) (uint64, error) {
 	if si.State.Msgs == 0 {
 		return 0, nil
 	}
+	key := fmt.Sprintf("%s|%d|%d|%d", strings.Join(subjects, ","), n, si.State.FirstSeq, si.State.LastSeq)
+	h.cacheMu.Lock()
+	start, hit := h.cache[key]
+	h.cacheMu.Unlock()
+	if hit {
+		return start, nil
+	}
+	start, err = h.searchStart(ctx, subjects, n, si.State.FirstSeq, si.State.LastSeq)
+	if err != nil {
+		return 0, err
+	}
+	h.cacheMu.Lock()
+	if len(h.cache) >= 1024 {
+		clear(h.cache)
+	}
+	if h.cache == nil {
+		h.cache = map[string]uint64{}
+	}
+	h.cache[key] = start
+	h.cacheMu.Unlock()
+	return start, nil
+}
 
-	lo, hi := si.State.FirstSeq, si.State.LastSeq
+// searchStart is a binary search on NumPending over [first, last].
+func (h *Handler) searchStart(ctx context.Context, subjects []string, n int, first, last uint64) (uint64, error) {
+	lo, hi := first, last
 	total, err := h.pendingFrom(subjects, lo)
 	if err != nil {
 		return 0, err
@@ -209,6 +245,9 @@ func (h *Handler) startSeqForLast(subjects []string, n int) (uint64, error) {
 	}
 	// invariant: pendingFrom(lo) >= n
 	for lo < hi {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		mid := lo + (hi-lo+1)/2
 		p, err := h.pendingFrom(subjects, mid)
 		if err != nil {

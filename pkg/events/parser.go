@@ -13,10 +13,15 @@ import (
 type id string
 
 func (i *id) UnmarshalJSON(b []byte) error {
-	*i = id(strings.Trim(string(b), `"`))
-	if *i == "null" {
-		*i = ""
+	s := strings.Trim(string(b), `"`)
+	// GitHub ids are integers; anything else is kept out of subjects and labels
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			s = ""
+			break
+		}
 	}
+	*i = id(s)
 	return nil
 }
 

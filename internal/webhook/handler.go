@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -62,6 +61,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	deliveryID := r.Header.Get("X-GitHub-Delivery")
+	headerEvent := r.Header.Get("X-GitHub-Event")
+	if deliveryID == "" || headerEvent == "" {
+		fail(http.StatusBadRequest, "Missing required GitHub headers", "missing_headers")
+		return
+	}
+	// 25 MB is read and hashed only for a request that can still pass.
+	signature := r.Header.Get("X-Hub-Signature-256")
+	if h.config.Secret != "" && !wellFormed(signature) {
+		fail(http.StatusUnauthorized, "Invalid signature", "invalid_signature")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, h.config.MaxPayloadSize)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -75,17 +87,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	payloadSize = len(body)
 
-	deliveryID := r.Header.Get("X-GitHub-Delivery")
-	headerEvent := r.Header.Get("X-GitHub-Event")
-	if deliveryID == "" || headerEvent == "" {
-		fail(http.StatusBadRequest, "Missing required GitHub headers", "missing_headers")
-		return
-	}
-	if !h.validSignature(body, r.Header.Get("X-Hub-Signature-256")) {
+	if !h.validSignature(body, signature) {
 		fail(http.StatusUnauthorized, "Invalid signature", "invalid_signature")
 		return
 	}
-	// the header becomes a metric label; only verified requests may create series.
+	// headers become metric labels; only verified requests may create series.
 	eventType = headerEvent
 
 	event := &events.GitHubEvent{
@@ -100,7 +106,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusBadRequest, "Payload is not JSON", "invalid_payload")
 		return
 	}
-	organization = event.Organization
 
 	slog.Debug("Received webhook event",
 		"delivery_id", deliveryID,
@@ -115,13 +120,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"hook_id", event.HookID)
 
 	if len(h.config.AllowedOrgs) > 0 && !slices.Contains(h.config.AllowedOrgs, event.Organization) {
+		// not a label either: a rejected sender must not create series.
 		fail(http.StatusForbidden, "Organization not allowed", "org_not_allowed")
 		return
 	}
+	organization = event.Organization
 
 	// a ping is GitHub testing the endpoint; it is answered, not stored.
 	if eventType == "ping" {
-		writeJSON(w, http.StatusOK, fmt.Sprintf(`{"status":"ok","message":"pong","delivery_id":"%s"}`, deliveryID))
+		reply(w, map[string]string{"status": "ok", "message": "pong", "delivery_id": deliveryID})
 		status = "success_ping"
 		return
 	}
@@ -140,7 +147,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, fmt.Sprintf(`{"status":"ok","delivery_id":"%s"}`, deliveryID))
+	reply(w, map[string]string{"status": "ok", "delivery_id": deliveryID})
 	status = "success"
 }
 
@@ -157,4 +164,19 @@ func (h *Handler) validSignature(payload []byte, signature string) bool {
 	mac := hmac.New(sha256.New, []byte(h.config.Secret))
 	mac.Write(payload)
 	return hmac.Equal([]byte(hexSig), []byte(hex.EncodeToString(mac.Sum(nil))))
+}
+
+// wellFormed is the shape GitHub sends: sha256= and 64 hex digits.
+func wellFormed(signature string) bool {
+	hexSig, ok := strings.CutPrefix(signature, "sha256=")
+	if !ok || len(hexSig) != 64 {
+		return false
+	}
+	_, err := hex.DecodeString(hexSig)
+	return err == nil
+}
+
+func reply(w http.ResponseWriter, body map[string]string) {
+	b, _ := json.Marshal(body)
+	writeJSON(w, http.StatusOK, string(b))
 }

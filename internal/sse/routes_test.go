@@ -321,3 +321,14 @@ func TestMaxClients(t *testing.T) {
 		t.Errorf("after the first client left: %d, want 200", code)
 	}
 }
+
+func TestLastEventIDNeverReplaysPastTheCap(t *testing.T) {
+	old := maxLast
+	maxLast = 2
+	t.Cleanup(func() { maxLast = old })
+	f := newFixture(t)
+	got, _ := f.read("/events/org/1", "0", 2)
+	if ids := ids(got); strings.Join(ids, " ") != "d3 d6" {
+		t.Errorf("Last-Event-ID 0 with a cap of 2 replayed %v, want the last two of org 1", ids)
+	}
+}

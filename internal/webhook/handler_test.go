@@ -7,8 +7,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -339,4 +341,28 @@ type blockingPublisher struct{}
 func (blockingPublisher) Publish(ctx context.Context, e *events.GitHubEvent) (bool, error) {
 	<-ctx.Done()
 	return false, ctx.Err()
+}
+
+type tripwire struct{ t *testing.T }
+
+func (r tripwire) Read([]byte) (int, error) {
+	r.t.Error("body read before the cheap checks passed")
+	return 0, io.EOF
+}
+
+func TestBodyIsNotReadBeforeTheSignatureLooksRight(t *testing.T) {
+	cfg := &config.WebhookConfig{Secret: "s", MaxPayloadSize: 1 << 20, RequestTimeout: time.Second}
+	handler := NewHandler(cfg, chanPublisher(make(chan *events.GitHubEvent, 1)))
+	for _, sig := range []string{"", "sha256=zz", "sha1=" + strings.Repeat("a", 64), "sha256=" + strings.Repeat("a", 63)} {
+		req := httptest.NewRequest("POST", "/webhook", tripwire{t})
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-GitHub-Delivery", "d1")
+		req.Header.Set("X-GitHub-Event", "push")
+		req.Header.Set("X-Hub-Signature-256", sig)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("signature %q: status %d, want 401", sig, rec.Code)
+		}
+	}
 }

@@ -30,6 +30,23 @@ let
       "AF_UNIX"
     ];
     LockPersonality = true;
+    CapabilityBoundingSet = "";
+    SystemCallFilter = [
+      "@system-service"
+      "~@privileged"
+    ];
+    SystemCallArchitectures = "native";
+    RestrictNamespaces = true;
+    RestrictRealtime = true;
+    RestrictSUIDSGID = true;
+    PrivateDevices = true;
+    ProtectClock = true;
+    ProtectHostname = true;
+    ProtectKernelLogs = true;
+    ProtectProc = "invisible";
+    ProcSubset = "pid";
+    MemoryDenyWriteExecute = true;
+    UMask = "0077";
   };
 
   mkService =
@@ -216,6 +233,15 @@ in
       enable = true;
       recommendedProxySettings = true;
       recommendedTlsSettings = true;
+      # GitHub delivers up to 25 MB; the NixOS default of 10m would 413 them
+      clientMaxBodySize = "25m";
+      # one browser needs a handful of streams; a flood must not take the
+      # SSE_MAX_CLIENTS slots of everyone else. /webhook is not limited:
+      # GitHub does not retry a refused delivery.
+      commonHttpConfig = ''
+        limit_conn_zone $binary_remote_addr zone=octoflow_sse:10m;
+        limit_req_zone $binary_remote_addr zone=octoflow_req:10m rate=10r/s;
+      '';
       virtualHosts.${cfg.domain} = {
         enableACME = true;
         forceSSL = true;
@@ -224,6 +250,8 @@ in
           proxyPass = "http://${cfg.sse.listen}";
           # SSE streams stay open; nginx must not buffer or time them out.
           extraConfig = ''
+            limit_conn octoflow_sse 20;
+            limit_req zone=octoflow_req burst=20 nodelay;
             proxy_buffering off;
             proxy_cache off;
             proxy_read_timeout 1h;

@@ -152,3 +152,12 @@ func TestExtractEventEntitiesNumbers(t *testing.T) {
 		})
 	}
 }
+
+func TestIDsMustBeNumeric(t *testing.T) {
+	for in, want := range map[string]string{`7`: "7", `"7"`: "7", `null`: "", `"12.evil"`: "", `"a"`: "", `{"x":1}`: "", `-1`: ""} {
+		var got id
+		if err := got.UnmarshalJSON([]byte(in)); err != nil || string(got) != want {
+			t.Errorf("id %s = %q, %v; want %q", in, got, err, want)
+		}
+	}
+}

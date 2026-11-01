@@ -40,6 +40,11 @@ protection, `AF_INET`, `AF_INET6` and `AF_UNIX` only. All set
 `NATS_STREAM_REPLICAS=1` and wait for `network-online.target` and, when
 `nats.enable`, `nats.service`.
 
+With `domain` set, nginx terminates TLS, proxies `/webhook` and the SSE
+routes, accepts bodies up to 25 MB, and limits each client address to
+20 open streams and 10 requests per second on the SSE routes. `/webhook`
+is not rate limited: GitHub does not retry a refused delivery.
+
 The dashboard is not deployed by the module; serve `web/index.html`
 from the package's `share/octoflow/web` with any static server if you
 want it, and open it with `?sse=https://<domain>`.

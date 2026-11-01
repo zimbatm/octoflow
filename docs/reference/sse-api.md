@@ -39,7 +39,7 @@ anything else is a 404.
 
 | Header | Meaning |
 |---|---|
-| `Last-Event-ID: <sequence>` | resume after this stream sequence; browsers send it on reconnect |
+| `Last-Event-ID: <sequence>` | resume after this stream sequence; browsers send it on reconnect. An id older than the last 1000 matching events resumes at those 1000 |
 
 ## Stream contents
 
