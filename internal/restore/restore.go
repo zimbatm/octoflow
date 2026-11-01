@@ -25,7 +25,6 @@ type Options struct {
 	Events []string
 	// empty means every repository or organization
 	RepoID, OrgID string
-	DryRun        bool
 }
 
 type Stats struct {
@@ -35,11 +34,12 @@ type Stats struct {
 // Run reads the archive days From to To plus one, because a file holds
 // events received before its upload time and can spill into the next day,
 // and publishes every event whose received_at is in the range. Events are
-// published in archive order; the stream drops those it still holds.
+// published in archive order; the stream drops those it still holds. A nil
+// pub is a dry run: everything is read and counted, nothing is published.
 func Run(ctx context.Context, store storage.ObjectStore, pub Publisher, opts Options) (Stats, error) {
 	var st Stats
-	from := day(opts.From)
-	end := day(opts.To).Add(24 * time.Hour)
+	from := opts.From.UTC().Truncate(24 * time.Hour)
+	end := opts.To.UTC().Truncate(24 * time.Hour).Add(24 * time.Hour)
 
 	var keys []string
 	for d := from; !d.After(end); d = d.Add(24 * time.Hour) {
@@ -73,7 +73,7 @@ func Run(ctx context.Context, store storage.ObjectStore, pub Publisher, opts Opt
 			}
 			st.Matched++
 			fileMatched++
-			if opts.DryRun {
+			if pub == nil {
 				continue
 			}
 			dup, err := pub.Publish(ctx, ev)
@@ -106,9 +106,4 @@ func matches(ev *events.GitHubEvent, opts *Options, from, end time.Time) bool {
 		return false
 	}
 	return true
-}
-
-func day(t time.Time) time.Time {
-	t = t.UTC()
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }

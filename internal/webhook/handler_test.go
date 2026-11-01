@@ -60,7 +60,7 @@ func TestHandlerWebhookValidation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &config.WebhookConfig{
 				Secret:         tt.secret,
-				MaxPayloadSize: 26214400, // 25MB
+				MaxPayloadSize: 26214400, RequestTimeout: time.Second,
 			}
 			handler := NewHandler(cfg, eventCh)
 
@@ -107,7 +107,7 @@ func TestHandlerEventParsing(t *testing.T) {
 	eventCh := make(chanPublisher, 10)
 	cfg := &config.WebhookConfig{
 		Secret:         "",
-		MaxPayloadSize: 26214400, // 25MB
+		MaxPayloadSize: 26214400, RequestTimeout: time.Second,
 	}
 	handler := NewHandler(cfg, eventCh)
 
@@ -167,15 +167,15 @@ func TestHandlerEventParsing(t *testing.T) {
 
 type chanPublisher chan *events.GitHubEvent
 
-func (c chanPublisher) PublishEvent(ctx context.Context, e *events.GitHubEvent) error {
+func (c chanPublisher) Publish(ctx context.Context, e *events.GitHubEvent) (bool, error) {
 	c <- e
-	return nil
+	return false, nil
 }
 
 type failingPublisher struct{}
 
-func (failingPublisher) PublishEvent(ctx context.Context, e *events.GitHubEvent) error {
-	return errors.New("nats down")
+func (failingPublisher) Publish(ctx context.Context, e *events.GitHubEvent) (bool, error) {
+	return false, errors.New("nats down")
 }
 
 func TestHandlerPublishFailure(t *testing.T) {
@@ -263,11 +263,12 @@ func TestHandlerRejections(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			tt.cfg.RequestTimeout = time.Second
 			if tt.cfg.MaxPayloadSize == 0 {
 				tt.cfg.MaxPayloadSize = 1 << 20
 			}
 			published := make(chanPublisher, 1)
-			handler := NewHandler(&tt.cfg, published)
+			handler := NewServer(&tt.cfg, published).Handler
 
 			method := tt.method
 			if method == "" {
@@ -295,7 +296,7 @@ func TestHandlerRejections(t *testing.T) {
 
 func TestHandlerAcknowledgesPingWithoutPublishing(t *testing.T) {
 	published := make(chanPublisher, 1)
-	handler := NewHandler(&config.WebhookConfig{MaxPayloadSize: 1 << 20}, published)
+	handler := NewHandler(&config.WebhookConfig{MaxPayloadSize: 1 << 20, RequestTimeout: time.Second}, published)
 
 	req := httptest.NewRequest("POST", "/webhook", bytes.NewBufferString(`{"zen":"Keep it logically awesome.","hook_id":1}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -333,7 +334,7 @@ func TestHandlerTimesOutSlowPublisher(t *testing.T) {
 
 type blockingPublisher struct{}
 
-func (blockingPublisher) PublishEvent(ctx context.Context, e *events.GitHubEvent) error {
+func (blockingPublisher) Publish(ctx context.Context, e *events.GitHubEvent) (bool, error) {
 	<-ctx.Done()
-	return ctx.Err()
+	return false, ctx.Err()
 }

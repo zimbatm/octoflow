@@ -137,13 +137,9 @@ func TestRunFilters(t *testing.T) {
 
 func TestRunDryRunReadsButDoesNotPublish(t *testing.T) {
 	s := newStore(t)
-	rec := &recorder{}
-	st, err := Run(context.Background(), s, rec, Options{KeyPrefix: "events", From: at(13, 0), To: at(15, 0), DryRun: true})
+	st, err := Run(context.Background(), s, nil, Options{KeyPrefix: "events", From: at(13, 0), To: at(15, 0)})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(rec.ids) != 0 {
-		t.Errorf("dry run published %v", rec.ids)
 	}
 	if st.Matched != 5 || st.Published != 0 || len(s.gets) != 3 {
 		t.Errorf("stats = %+v, files read = %d", st, len(s.gets))

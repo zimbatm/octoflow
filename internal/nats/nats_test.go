@@ -70,12 +70,12 @@ func TestPublishEventDeduplicatesByID(t *testing.T) {
 
 	org := &events.GitHubEvent{ID: "d1", Event: "push", OrganizationID: "42", Payload: json.RawMessage(`{}`)}
 	for i := 0; i < 2; i++ {
-		if err := p.PublishEvent(ctx, org); err != nil {
+		if _, err := p.Publish(ctx, org); err != nil {
 			t.Fatalf("publish %d: %v", i, err)
 		}
 	}
 	global := &events.GitHubEvent{ID: "d2", Event: "sponsorship", Payload: json.RawMessage(`{}`)}
-	if err := p.PublishEvent(ctx, global); err != nil {
+	if _, err := p.Publish(ctx, global); err != nil {
 		t.Fatal(err)
 	}
 

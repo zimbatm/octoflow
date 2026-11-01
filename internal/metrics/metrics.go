@@ -99,21 +99,3 @@ var (
 		Help: "Consumers on the events stream, including SSE clients",
 	})
 )
-
-func RecordWebhookRequest(eventType, organization, status string, duration float64, payloadSize int) {
-	WebhookRequestsTotal.WithLabelValues(eventType, organization, status).Inc()
-	WebhookRequestDuration.WithLabelValues(eventType).Observe(duration)
-	WebhookPayloadSize.WithLabelValues(eventType).Observe(float64(payloadSize))
-}
-
-func RecordNATSPublish(stream, eventType, status string, duration float64) {
-	NATSPublishedEvents.WithLabelValues(stream, eventType, status).Inc()
-	NATSPublishDuration.WithLabelValues(stream).Observe(duration)
-}
-
-func RecordS3Write(status string, eventCount int, batchSize int64, duration float64) {
-	S3BatchesWritten.WithLabelValues(status).Inc()
-	S3EventsPerBatch.Observe(float64(eventCount))
-	S3BatchSize.Observe(float64(batchSize))
-	S3WriteDuration.Observe(duration)
-}

@@ -10,12 +10,12 @@ import (
 
 // NewServer returns the receiver's HTTP server, ready for ListenAndServe.
 func NewServer(cfg *config.WebhookConfig, publisher Publisher) *http.Server {
-	handler := NewHandler(cfg, publisher)
-
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", rootHandler)
-	mux.HandleFunc("/webhook", handler.ServeHTTP)
-	mux.HandleFunc(cfg.HealthPath, healthHandler)
+	mux.Handle("POST /webhook", NewHandler(cfg, publisher))
+	mux.HandleFunc("GET /{$}", rootHandler)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, `{"status":"healthy","service":"webhook-receiver"}`)
+	})
 
 	return &http.Server{
 		Addr:              cfg.ListenAddr,
@@ -31,15 +31,6 @@ func NewServer(cfg *config.WebhookConfig, publisher Publisher) *http.Server {
 
 // rootHandler tells a browser what this endpoint is and how to configure GitHub.
 func rootHandler(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, `{"error":"Method not allowed. POST requests should go to /webhook","webhook_endpoint":"/webhook"}`)
-		return
-	}
-
 	writeJSON(w, http.StatusOK, `{
   "service": "octoflow-webhook-receiver",
   "description": "GitHub webhook receiver for the octoflow event pipeline",
@@ -56,10 +47,6 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
   },
   "documentation": "https://github.com/zimbatm/octoflow"
 }`)
-}
-
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, `{"status":"healthy","service":"webhook-receiver"}`)
 }
 
 func writeJSON(w http.ResponseWriter, status int, body string) {

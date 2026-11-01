@@ -9,9 +9,8 @@ import (
 	"github.com/zimbatm/octoflow/internal/config"
 )
 
-// Connect creates a NATS connection with the given configuration
+// Connect opens a connection with the credentials in cfg.
 func Connect(cfg *config.NATSConfig) (*nats.Conn, error) {
-	// Build connection options
 	opts := []nats.Option{
 		nats.MaxReconnects(cfg.MaxReconnects),
 		nats.ReconnectWait(cfg.ReconnectWait),
@@ -27,12 +26,12 @@ func Connect(cfg *config.NATSConfig) (*nats.Conn, error) {
 		}),
 	}
 
-	// Add authentication if configured
-	if cfg.Username != "" && cfg.Password != "" {
+	switch {
+	case cfg.Username != "" && cfg.Password != "":
 		opts = append(opts, nats.UserInfo(cfg.Username, cfg.Password))
-	} else if cfg.Token != "" {
+	case cfg.Token != "":
 		opts = append(opts, nats.Token(cfg.Token))
-	} else if cfg.NKey != "" {
+	case cfg.NKey != "":
 		opt, err := nats.NkeyOptionFromSeed(cfg.NKey)
 		if err != nil {
 			return nil, fmt.Errorf("invalid nkey seed: %w", err)
@@ -40,11 +39,28 @@ func Connect(cfg *config.NATSConfig) (*nats.Conn, error) {
 		opts = append(opts, opt)
 	}
 
-	// Connect to NATS
 	nc, err := nats.Connect(strings.Join(cfg.Servers, ","), opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
-
 	return nc, nil
+}
+
+// ConnectJetStream connects, opens a JetStream context and ensures the
+// events stream exists. The caller closes the connection.
+func ConnectJetStream(cfg *config.NATSConfig) (*nats.Conn, nats.JetStreamContext, error) {
+	nc, err := Connect(cfg)
+	if err != nil {
+		return nil, nil, err
+	}
+	js, err := nc.JetStream()
+	if err != nil {
+		nc.Close()
+		return nil, nil, fmt.Errorf("failed to create JetStream context: %w", err)
+	}
+	if err := EnsureStream(js, cfg); err != nil {
+		nc.Close()
+		return nil, nil, err
+	}
+	return nc, js, nil
 }

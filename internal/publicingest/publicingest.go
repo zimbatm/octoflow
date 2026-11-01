@@ -4,12 +4,13 @@
 package publicingest
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 	"time"
 
@@ -24,7 +25,7 @@ import (
 const StateBucket = "octoflow_public_ingest"
 
 type Publisher interface {
-	PublishEvent(ctx context.Context, event *events.GitHubEvent) error
+	Publish(ctx context.Context, event *events.GitHubEvent) (duplicate bool, err error)
 }
 
 type Ingest struct {
@@ -66,9 +67,8 @@ func (in *Ingest) publish(ctx context.Context, e *ghevents.Event, owner ghevents
 		return nil
 	}
 	err = retry.Do(ctx, func(ctx context.Context) error {
-		pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		return in.Publisher.PublishEvent(pctx, ev)
+		_, err := in.Publisher.Publish(ctx, ev)
+		return err
 	}, retry.DefaultConfig())
 	if err == nil {
 		metrics.PublicIngestEvents.WithLabelValues(source).Inc()
@@ -132,7 +132,7 @@ func (in *Ingest) PollRepo(ctx context.Context, repo *ghevents.RepoInfo, etags m
 	all := first.Events
 	page := first.Events
 	quota := first.Quota
-	for p := 2; p <= pagesPerPoll && len(page) > 0 && minID(page) > lastID; p++ {
+	for p := 2; p <= pagesPerPoll && len(page) > 0 && page[len(page)-1].NumericID() > lastID; p++ {
 		next, err := in.GH.RepoEvents(ctx, repo.FullName, p, "")
 		if wait, limited := in.rateLimitWait(repo, err); limited {
 			return wait, nil
@@ -146,10 +146,10 @@ func (in *Ingest) PollRepo(ctx context.Context, repo *ghevents.RepoInfo, etags m
 		all = append(all, page...)
 	}
 
-	sort.Slice(all, func(i, j int) bool { return all[i].NumericID() < all[j].NumericID() })
-	if lastID > 0 && len(all) >= 300 && minID(all) > lastID {
+	slices.SortFunc(all, func(a, b ghevents.Event) int { return cmp.Compare(a.NumericID(), b.NumericID()) })
+	if lastID > 0 && len(all) >= 300 && all[0].NumericID() > lastID {
 		slog.Warn("Events API window overflowed; GH Archive has to fill the gap",
-			"repo", repo.FullName, "last_id", lastID, "oldest_id", minID(all))
+			"repo", repo.FullName, "last_id", lastID, "oldest_id", all[0].NumericID())
 	}
 
 	published := 0
@@ -201,16 +201,6 @@ func (in *Ingest) nextPoll(page *ghevents.EventsPage, q ghevents.Quota) time.Dur
 	return wait
 }
 
-func minID(evs []ghevents.Event) int64 {
-	m := int64(-1)
-	for i := range evs {
-		if id := evs[i].NumericID(); m < 0 || id < m {
-			m = id
-		}
-	}
-	return m
-}
-
 // RunGHArchive imports each hourly file from base once it is out, about ten
 // minutes after the hour ends, until ctx ends. start is the first hour to
 // import when no progress is saved yet.
@@ -235,18 +225,9 @@ func (in *Ingest) RunGHArchive(ctx context.Context, base string, start time.Time
 		}
 	}
 
-	sleep := func(d time.Duration) bool {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(d):
-			return true
-		}
-	}
-
 	for ctx.Err() == nil {
 		if due := next.Add(time.Hour + 10*time.Minute); in.now().Before(due) {
-			if !sleep(due.Sub(in.now())) {
+			if !retry.Sleep(ctx, due.Sub(in.now())) {
 				return
 			}
 		}
@@ -260,14 +241,14 @@ func (in *Ingest) RunGHArchive(ctx context.Context, base string, start time.Time
 			slog.Warn("GH Archive hour missing; skipping", "hour", next)
 		case errors.Is(err, ghevents.ErrHourNotFound):
 			slog.Info("GH Archive hour not published yet", "hour", next)
-			if !sleep(10 * time.Minute) {
+			if !retry.Sleep(ctx, 10*time.Minute) {
 				return
 			}
 			continue
 		case err != nil:
 			// a partial hour is re-read in full; JetStream drops the repeats.
 			slog.Error("GH Archive import failed", "hour", next, "error", err)
-			if !sleep(time.Minute) {
+			if !retry.Sleep(ctx, time.Minute) {
 				return
 			}
 			continue

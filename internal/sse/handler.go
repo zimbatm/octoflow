@@ -9,192 +9,118 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
-	"github.com/zimbatm/octoflow/internal/config"
 	"github.com/zimbatm/octoflow/internal/metrics"
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// Handler handles SSE connections directly with NATS
+// maxLast bounds the replay a client can ask for with ?last=.
+const maxLast = 1000
+
+const heartbeatEvery = 30 * time.Second
+
+// Handler turns stream subjects into SSE streams.
 type Handler struct {
-	js          nats.JetStreamContext
-	cfg         *config.NATSConfig
-	clients     map[string]*ClientConnection
-	clientMutex sync.RWMutex
+	js      nats.JetStreamContext
+	stream  string
+	clients atomic.Int64
 }
 
-// ClientConnection represents an active SSE connection
-type ClientConnection struct {
-	ID         string
-	StreamID   string
-	Subject    string
-	StartTime  time.Time
-	EventCount atomic.Int64
+func NewHandler(js nats.JetStreamContext, stream string) *Handler {
+	return &Handler{js: js, stream: stream}
 }
 
-// NewHandler creates a new SSE handler
-func NewHandler(js nats.JetStreamContext, cfg *config.NATSConfig) *Handler {
-	return &Handler{
-		js:      js,
-		cfg:     cfg,
-		clients: make(map[string]*ClientConnection),
-	}
-}
+// Clients is the number of open streams.
+func (h *Handler) Clients() int64 { return h.clients.Load() }
 
-// ServeHTTP handles SSE connections
-func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID string, subjects []string, filter *events.EventFilter) {
-	// Create SSE writer
-	sseWriter, err := NewWriter(w)
+// Stream replays the last ?last= events matching subjects, or resumes after
+// Last-Event-ID, then writes new ones until the client leaves. streamID
+// names the route for logs and metrics, for example org-222.
+func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string, subjects []string, filter *events.EventFilter) {
+	sw, err := NewWriter(w)
 	if err != nil {
 		http.Error(w, "SSE not supported", http.StatusInternalServerError)
 		return
 	}
-
-	// Get Last-Event-ID header for resumption
-	lastEventID := r.Header.Get("Last-Event-ID")
-
-	// ?last=N replays the last N matching events first; 0 means none.
 	lastCount := 50
-	if lastParam := r.URL.Query().Get("last"); lastParam != "" {
-		if n, err := strconv.Atoi(lastParam); err == nil && n >= 0 {
-			lastCount = n
-		}
+	if n, err := strconv.Atoi(r.URL.Query().Get("last")); err == nil && n >= 0 {
+		lastCount = n
 	}
+	kind, _, _ := strings.Cut(streamID, "-")
 
-	// Create client connection record
-	clientID := fmt.Sprintf("%s-%d", streamID, time.Now().UnixNano())
-	client := &ClientConnection{
-		ID:        clientID,
-		StreamID:  streamID,
-		Subject:   strings.Join(subjects, ","),
-		StartTime: time.Now(),
-	}
+	h.clients.Add(1)
+	metrics.SSEClients.Set(float64(h.clients.Load()))
+	start := time.Now()
+	sent := 0
+	slog.Info("SSE client connected", "stream_id", streamID, "subjects", subjects)
+	defer func() {
+		h.clients.Add(-1)
+		metrics.SSEClients.Set(float64(h.clients.Load()))
+		slog.Info("SSE client disconnected", "stream_id", streamID, "duration", time.Since(start), "events", sent)
+	}()
 
-	h.registerClient(client)
-	defer h.unregisterClient(clientID)
-
-	if err := sseWriter.WriteRetry(5000); err != nil {
+	if err := sw.WriteRetry(5000); err != nil {
 		return
 	}
-
-	// Create context that cancels when client disconnects
 	ctx := r.Context()
-
-	// Create NATS subscription with JetStream
-	sub, err := h.createSubscription(ctx, subjects, lastEventID, lastCount)
+	sub, err := h.subscribe(ctx, subjects, r.Header.Get("Last-Event-ID"), lastCount)
 	if err != nil {
-		slog.Error("Failed to create NATS subscription",
-			"error", err,
-			"subjects", subjects,
-			"client_id", clientID)
-		_ = sseWriter.WriteEvent("", "error", []byte(`{"error":"Failed to create subscription"}`))
+		slog.Error("Failed to create NATS subscription", "error", err, "subjects", subjects, "stream_id", streamID)
+		_ = sw.WriteEvent("", "error", []byte(`{"error":"Failed to create subscription"}`))
 		return
 	}
 	defer func() { _ = sub.Unsubscribe() }()
 
-	// Send connected event
-	connectedMsg := map[string]string{
-		"status":    "connected",
-		"stream_id": streamID,
-		"subjects":  strings.Join(subjects, ","),
-	}
-	connectedData, _ := json.Marshal(connectedMsg)
-	if err := sseWriter.WriteEvent("", "connected", connectedData); err != nil {
+	connected, _ := json.Marshal(map[string]string{
+		"status": "connected", "stream_id": streamID, "subjects": strings.Join(subjects, ","),
+	})
+	if err := sw.WriteEvent("", "connected", connected); err != nil {
 		return
 	}
 
-	// Start heartbeat
-	heartbeat := time.NewTicker(30 * time.Second)
-	defer heartbeat.Stop()
-
-	// Message handling loop
-	msgCh := make(chan *nats.Msg, 100)
-	errCh := make(chan error, 1)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
+	lastWrite := time.Now()
+	for ctx.Err() == nil {
+		msgs, err := sub.Fetch(10, nats.MaxWait(time.Second))
+		if err != nil && !errors.Is(err, nats.ErrTimeout) {
+			if ctx.Err() != nil {
 				return
-			default:
-				msgs, err := sub.Fetch(10, nats.MaxWait(1*time.Second))
-				if err != nil {
-					if err == nats.ErrTimeout {
-						continue
-					}
-					if ctx.Err() != nil {
-						return
-					}
-					// For any other error, log and exit
-					slog.Error("Error fetching messages", "error", err, "client_id", clientID)
-					select {
-					case errCh <- err:
-					default:
-					}
-					return
-				}
-				for _, msg := range msgs {
-					select {
-					case msgCh <- msg:
-					case <-ctx.Done():
-						return
-					}
-				}
 			}
+			slog.Error("Error fetching messages", "error", err, "stream_id", streamID)
+			_ = sw.WriteEvent("", "error", []byte(fmt.Sprintf(`{"error":"Stream error: %s"}`, err)))
+			return
 		}
-	}()
-
-	// Main event loop
-	for {
-		select {
-		case <-ctx.Done():
-			// Client disconnected
-			return
-
-		case err := <-errCh:
-			// Fatal error in fetch loop
-			slog.Error("Fatal error in SSE handler", "error", err, "client_id", clientID)
-			_ = sseWriter.WriteEvent("", "error", []byte(fmt.Sprintf(`{"error":"Stream error: %s"}`, err.Error())))
-			return
-
-		case <-heartbeat.C:
-			// Send heartbeat comment
-			if err := sseWriter.WriteComment("heartbeat"); err != nil {
-				return
-			}
-
-		case msg := <-msgCh:
+		for _, msg := range msgs {
 			var event events.GitHubEvent
 			if err := json.Unmarshal(msg.Data, &event); err != nil {
 				slog.Error("Failed to unmarshal event", "error", err)
 				continue
 			}
-
-			if filter != nil && !filter.Matches(&event) {
+			if !filter.Matches(&event) {
 				continue
 			}
-
 			meta, err := msg.Metadata()
 			if err != nil {
 				slog.Error("Message without JetStream metadata", "error", err)
 				continue
 			}
-			id := strconv.FormatUint(meta.Sequence.Stream, 10)
-			if err := sseWriter.WriteEvent(id, event.Event, msg.Data); err != nil {
+			if err := sw.WriteEvent(strconv.FormatUint(meta.Sequence.Stream, 10), event.Event, msg.Data); err != nil {
 				return
 			}
-
-			client.EventCount.Add(1)
-			metrics.SSEEventsSent.WithLabelValues(routeKind(streamID)).Inc()
+			lastWrite = time.Now()
+			sent++
+			metrics.SSEEventsSent.WithLabelValues(kind).Inc()
+		}
+		if time.Since(lastWrite) >= heartbeatEvery {
+			if err := sw.WriteComment("heartbeat"); err != nil {
+				return
+			}
+			lastWrite = time.Now()
 		}
 	}
 }
-
-// maxLast bounds the replay a client can ask for with ?last=.
-const maxLast = 1000
 
 var consumerSeq atomic.Uint64
 
@@ -202,9 +128,9 @@ func (h *Handler) consumerName() string {
 	return fmt.Sprintf("sse-%d-%d", time.Now().UnixNano(), consumerSeq.Add(1))
 }
 
-// createSubscription creates a consumer that the server deletes once idle. Last-Event-ID is the
-// stream sequence of the last event the client saw.
-func (h *Handler) createSubscription(ctx context.Context, subjects []string, lastEventID string, lastCount int) (*nats.Subscription, error) {
+// subscribe creates a consumer that the server deletes once idle.
+// Last-Event-ID is the stream sequence of the last event the client saw.
+func (h *Handler) subscribe(ctx context.Context, subjects []string, lastEventID string, lastCount int) (*nats.Subscription, error) {
 	name := h.consumerName()
 	cc := &nats.ConsumerConfig{
 		Durable:        name,
@@ -229,26 +155,24 @@ func (h *Handler) createSubscription(ctx context.Context, subjects []string, las
 		}
 	}
 
-	if _, err := h.js.AddConsumer(h.cfg.StreamName, cc); err != nil {
+	if _, err := h.js.AddConsumer(h.stream, cc); err != nil {
 		return nil, fmt.Errorf("failed to create consumer: %w", err)
 	}
-	sub, err := h.js.PullSubscribe("", name, nats.Bind(h.cfg.StreamName, name))
+	sub, err := h.js.PullSubscribe("", name, nats.Bind(h.stream, name))
 	if err != nil {
 		h.deleteConsumer(name)
 		return nil, fmt.Errorf("failed to create subscription: %w", err)
 	}
-
 	go func() {
 		<-ctx.Done()
 		h.deleteConsumer(name)
 	}()
-
 	return sub, nil
 }
 
 // deleteConsumer is best effort: InactiveThreshold removes what it misses.
 func (h *Handler) deleteConsumer(name string) {
-	err := h.js.DeleteConsumer(h.cfg.StreamName, name)
+	err := h.js.DeleteConsumer(h.stream, name)
 	if err != nil && !errors.Is(err, nats.ErrConsumerNotFound) {
 		slog.Warn("Failed to delete consumer", "consumer", name, "error", err)
 	}
@@ -259,10 +183,8 @@ func (h *Handler) deleteConsumer(name string) {
 // stream holds fan-out copies of other subjects in between, so
 // LastSeq-n is wrong for any filter; a binary search on NumPending is not.
 func (h *Handler) startSeqForLast(subjects []string, n int) (uint64, error) {
-	if n > maxLast {
-		n = maxLast
-	}
-	si, err := h.js.StreamInfo(h.cfg.StreamName)
+	n = min(n, maxLast)
+	si, err := h.js.StreamInfo(h.stream)
 	if err != nil {
 		return 0, fmt.Errorf("failed to get stream info: %w", err)
 	}
@@ -296,7 +218,7 @@ func (h *Handler) startSeqForLast(subjects []string, n int) (uint64, error) {
 
 func (h *Handler) pendingFrom(subjects []string, seq uint64) (uint64, error) {
 	name := h.consumerName()
-	info, err := h.js.AddConsumer(h.cfg.StreamName, &nats.ConsumerConfig{
+	info, err := h.js.AddConsumer(h.stream, &nats.ConsumerConfig{
 		Durable:           name,
 		AckPolicy:         nats.AckNonePolicy,
 		FilterSubjects:    subjects,
@@ -309,62 +231,4 @@ func (h *Handler) pendingFrom(subjects []string, seq uint64) (uint64, error) {
 	}
 	h.deleteConsumer(name)
 	return info.NumPending, nil
-}
-
-// registerClient registers a new client connection
-func (h *Handler) registerClient(client *ClientConnection) {
-	h.clientMutex.Lock()
-	defer h.clientMutex.Unlock()
-	h.clients[client.ID] = client
-	metrics.SSEClients.Set(float64(len(h.clients)))
-	slog.Info("SSE client connected",
-		"client_id", client.ID,
-		"stream_id", client.StreamID,
-		"subject", client.Subject)
-}
-
-// unregisterClient removes a client connection
-func (h *Handler) unregisterClient(clientID string) {
-	h.clientMutex.Lock()
-	defer h.clientMutex.Unlock()
-
-	if client, exists := h.clients[clientID]; exists {
-		duration := time.Since(client.StartTime)
-		slog.Info("SSE client disconnected",
-			"client_id", clientID,
-			"stream_id", client.StreamID,
-			"duration", duration,
-			"event_count", client.EventCount.Load())
-		delete(h.clients, clientID)
-		metrics.SSEClients.Set(float64(len(h.clients)))
-	}
-}
-
-// routeKind is the metric label for a stream id such as org-222: the part
-// before the first dash, so ids never become label values.
-func routeKind(streamID string) string {
-	if i := strings.IndexByte(streamID, '-'); i >= 0 {
-		return streamID[:i]
-	}
-	return streamID
-}
-
-// GetStats returns current connection statistics
-func (h *Handler) GetStats() map[string]interface{} {
-	h.clientMutex.RLock()
-	defer h.clientMutex.RUnlock()
-
-	streamStats := make(map[string]int)
-	totalEvents := int64(0)
-
-	for _, client := range h.clients {
-		streamStats[client.StreamID]++
-		totalEvents += client.EventCount.Load()
-	}
-
-	return map[string]interface{}{
-		"total_clients":     len(h.clients),
-		"total_events":      totalEvents,
-		"clients_by_stream": streamStats,
-	}
 }

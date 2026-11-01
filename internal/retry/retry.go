@@ -24,11 +24,9 @@ func DefaultConfig() Config {
 	}
 }
 
-type Operation func(ctx context.Context) error
-
 // Do runs op until it succeeds, the attempts run out, or ctx ends. It
 // returns the last error and leaves reporting it to the caller.
-func Do(ctx context.Context, op Operation, cfg Config) error {
+func Do(ctx context.Context, op func(ctx context.Context) error, cfg Config) error {
 	delay := cfg.InitialDelay
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
@@ -46,11 +44,22 @@ func Do(ctx context.Context, op Operation, cfg Config) error {
 			"max_attempts", cfg.MaxAttempts,
 			"next_delay", delay,
 			"error", err)
-		select {
-		case <-time.After(delay):
-		case <-ctx.Done():
+		if !Sleep(ctx, delay) {
 			return ctx.Err()
 		}
 		delay = min(time.Duration(float64(delay)*cfg.Multiplier), cfg.MaxDelay)
+	}
+}
+
+// Sleep waits for d and reports whether it waited the whole time, false
+// when ctx ended first.
+func Sleep(ctx context.Context, d time.Duration) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
 	}
 }

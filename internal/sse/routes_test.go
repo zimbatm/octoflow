@@ -57,7 +57,7 @@ func newFixture(t *testing.T) *fixture {
 	add("d5", "2", "push")
 	add("d6", "1", "issues")
 
-	f.server = httptest.NewServer(Routes(NewHandler(js, cfg), "p"))
+	f.server = httptest.NewServer(Routes(NewHandler(js, "P"), "p"))
 	t.Cleanup(f.server.Close)
 	return f
 }
@@ -67,7 +67,7 @@ func (f *fixture) publish(id, org, typ string) {
 	ctx := context.Background()
 	ev := &events.GitHubEvent{ID: id, Event: typ, OrganizationID: org, RepositoryID: "7", Action: "opened",
 		Payload: json.RawMessage(`{}`)}
-	if err := f.pub.PublishEvent(ctx, ev); err != nil {
+	if _, err := f.pub.Publish(ctx, ev); err != nil {
 		f.t.Fatal(err)
 	}
 	data, _ := json.Marshal(ev)

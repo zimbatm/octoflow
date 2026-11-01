@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -22,46 +23,35 @@ import (
 
 // Publisher must deduplicate by event.ID: GitHub redeliveries reuse the delivery id.
 type Publisher interface {
-	PublishEvent(ctx context.Context, event *events.GitHubEvent) error
+	Publish(ctx context.Context, event *events.GitHubEvent) (duplicate bool, err error)
 }
 
-// Handler processes GitHub webhook requests
+// Handler receives GitHub webhook deliveries on POST /webhook.
 type Handler struct {
 	config    *config.WebhookConfig
 	publisher Publisher
 }
 
-// NewHandler creates a new webhook handler
 func NewHandler(cfg *config.WebhookConfig, publisher Publisher) *Handler {
-	return &Handler{
-		config:    cfg,
-		publisher: publisher,
-	}
+	return &Handler{config: cfg, publisher: publisher}
 }
 
-// ServeHTTP handles incoming webhook requests
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	var eventType, organization, status string
 	var payloadSize int
-
 	defer func() {
-		// Record metrics
-		metrics.RecordWebhookRequest(eventType, organization, status, time.Since(start).Seconds(), payloadSize)
+		metrics.WebhookRequestsTotal.WithLabelValues(eventType, organization, status).Inc()
+		metrics.WebhookRequestDuration.WithLabelValues(eventType).Observe(time.Since(start).Seconds())
+		metrics.WebhookPayloadSize.WithLabelValues(eventType).Observe(float64(payloadSize))
 	}()
-
-	// Only accept POST requests
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		status = "method_not_allowed"
-		return
+	fail := func(code int, msg, why string) {
+		http.Error(w, msg, code)
+		status = why
 	}
 
-	// Check content type
-	contentType := r.Header.Get("Content-Type")
-	if !strings.HasPrefix(contentType, "application/json") {
-		http.Error(w, "Content-Type must be application/json", http.StatusBadRequest)
-		status = "bad_content_type"
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		fail(http.StatusBadRequest, "Content-Type must be application/json", "bad_content_type")
 		return
 	}
 
@@ -70,57 +60,41 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var tooBig *http.MaxBytesError
 		if errors.As(err, &tooBig) {
-			http.Error(w, "Payload too large", http.StatusRequestEntityTooLarge)
-			status = "too_large"
-			return
+			fail(http.StatusRequestEntityTooLarge, "Payload too large", "too_large")
+		} else {
+			fail(http.StatusBadRequest, "Failed to read request body", "read_error")
 		}
-		http.Error(w, "Failed to read request body", http.StatusBadRequest)
-		status = "read_error"
 		return
 	}
 	payloadSize = len(body)
 
-	// Extract GitHub headers
 	deliveryID := r.Header.Get("X-GitHub-Delivery")
 	headerEvent := r.Header.Get("X-GitHub-Event")
-	signature := r.Header.Get("X-Hub-Signature-256")
-	hookID := r.Header.Get("X-GitHub-Hook-ID")
-	hookInstallation := r.Header.Get("X-GitHub-Hook-Installation-Target-ID")
-
-	// Validate required headers
 	if deliveryID == "" || headerEvent == "" {
-		http.Error(w, "Missing required GitHub headers", http.StatusBadRequest)
-		status = "missing_headers"
+		fail(http.StatusBadRequest, "Missing required GitHub headers", "missing_headers")
 		return
 	}
-
-	// Validate signature
-	if !h.validateSignature(body, signature) {
-		http.Error(w, "Invalid signature", http.StatusUnauthorized)
-		status = "invalid_signature"
+	if !h.validSignature(body, r.Header.Get("X-Hub-Signature-256")) {
+		fail(http.StatusUnauthorized, "Invalid signature", "invalid_signature")
 		return
 	}
 	// the header becomes a metric label; only verified requests may create series.
 	eventType = headerEvent
 
-	// Create event
 	event := &events.GitHubEvent{
 		ID:               deliveryID,
 		Event:            eventType,
-		HookID:           hookID,
-		HookInstallation: hookInstallation,
+		HookID:           r.Header.Get("X-GitHub-Hook-ID"),
+		HookInstallation: r.Header.Get("X-GitHub-Hook-Installation-Target-ID"),
 		ReceivedAt:       time.Now().UTC(),
 		Payload:          json.RawMessage(body),
 	}
-
 	if err := events.ParseCommonFields(event); err != nil {
-		http.Error(w, "Payload is not JSON", http.StatusBadRequest)
-		status = "invalid_payload"
+		fail(http.StatusBadRequest, "Payload is not JSON", "invalid_payload")
 		return
 	}
 	organization = event.Organization
 
-	// Log incoming webhook
 	slog.Info("Received webhook event",
 		"delivery_id", deliveryID,
 		"event_type", eventType,
@@ -131,20 +105,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"sender", event.Sender,
 		"sender_id", event.SenderID,
 		"payload_size", payloadSize,
-		"hook_id", hookID)
+		"hook_id", event.HookID)
 
-	// Check if organization is allowed
-	if !h.isOrgAllowed(event.Organization) {
-		http.Error(w, "Organization not allowed", http.StatusForbidden)
-		status = "org_not_allowed"
+	if len(h.config.AllowedOrgs) > 0 && !slices.Contains(h.config.AllowedOrgs, event.Organization) {
+		fail(http.StatusForbidden, "Organization not allowed", "org_not_allowed")
 		return
 	}
 
-	// Handle ping events specially - acknowledge but don't process
+	// a ping is GitHub testing the endpoint; it is answered, not stored.
 	if eventType == "ping" {
-		slog.Info("Received ping event, acknowledging without processing",
-			"delivery_id", deliveryID,
-			"hook_id", hookID)
 		writeJSON(w, http.StatusOK, fmt.Sprintf(`{"status":"ok","message":"pong","delivery_id":"%s"}`, deliveryID))
 		status = "success_ping"
 		return
@@ -152,18 +121,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// reply 200 only once the event is stored, so a failed delivery shows as
 	// failed in GitHub and can be redelivered.
-	ctx, cancel := context.WithTimeout(r.Context(), h.requestTimeout())
+	ctx, cancel := context.WithTimeout(r.Context(), h.config.RequestTimeout)
 	defer cancel()
 	err = retry.Do(ctx, func(ctx context.Context) error {
-		return h.publisher.PublishEvent(ctx, event)
+		_, err := h.publisher.Publish(ctx, event)
+		return err
 	}, retry.DefaultConfig())
 	if err != nil {
-		slog.Error("Failed to publish event",
-			"delivery_id", deliveryID,
-			"event_type", eventType,
-			"error", err)
-		http.Error(w, "Failed to store event", http.StatusServiceUnavailable)
-		status = "publish_error"
+		slog.Error("Failed to publish event", "delivery_id", deliveryID, "event_type", eventType, "error", err)
+		fail(http.StatusServiceUnavailable, "Failed to store event", "publish_error")
 		return
 	}
 
@@ -171,57 +137,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	status = "success"
 }
 
-// validateSignature validates the GitHub webhook signature
-func (h *Handler) validateSignature(payload []byte, signature string) bool {
-	// If no secret is configured locally, skip validation
+// validSignature checks the HMAC-SHA256 that GitHub sends. Without a
+// configured secret every delivery passes.
+func (h *Handler) validSignature(payload []byte, signature string) bool {
 	if h.config.Secret == "" {
 		return true
 	}
-
-	// If we have a secret configured but GitHub didn't send a signature,
-	// this means GitHub doesn't have the secret configured
-	if signature == "" {
-		slog.Warn("Local webhook secret configured but GitHub sent no signature",
-			"hint", "Either remove WEBHOOK_SECRET env var or configure secret in GitHub webhook settings")
+	hexSig, ok := strings.CutPrefix(signature, "sha256=")
+	if !ok {
 		return false
 	}
-
-	// Remove "sha256=" prefix
-	if !strings.HasPrefix(signature, "sha256=") {
-		return false
-	}
-	signature = strings.TrimPrefix(signature, "sha256=")
-
-	// Calculate expected signature
 	mac := hmac.New(sha256.New, []byte(h.config.Secret))
 	mac.Write(payload)
-	expectedSig := hex.EncodeToString(mac.Sum(nil))
-
-	// Constant-time comparison
-	return hmac.Equal([]byte(signature), []byte(expectedSig))
-}
-
-// isOrgAllowed checks if the organization is in the allowed list
-func (h *Handler) isOrgAllowed(org string) bool {
-	// If no organizations specified, all are allowed
-	if len(h.config.AllowedOrgs) == 0 {
-		return true
-	}
-
-	// Check if org is in allowed list
-	for _, allowed := range h.config.AllowedOrgs {
-		if allowed == org {
-			return true
-		}
-	}
-
-	return false
-}
-
-// a zero timeout makes the select pick randomly between a ready channel and an expired timer.
-func (h *Handler) requestTimeout() time.Duration {
-	if h.config.RequestTimeout > 0 {
-		return h.config.RequestTimeout
-	}
-	return 10 * time.Second
+	return hmac.Equal([]byte(hexSig), []byte(hex.EncodeToString(mac.Sum(nil))))
 }

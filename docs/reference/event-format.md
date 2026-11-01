@@ -66,7 +66,7 @@ this order:
 | `organization_id` | UTF8 | `organization_id` |
 | `repository_id` | UTF8 | `repository_id` |
 | `sender_id` | UTF8 | `sender_id` |
-| `metadata` | UTF8 | `metadata` as a JSON object, empty when the event has none; absent in files written before 2026-11-01 |
+| `metadata` | UTF8 | `metadata` as a JSON object, empty when the event has none |
 
 Files are Snappy-compressed with
 row groups of 10000 and named

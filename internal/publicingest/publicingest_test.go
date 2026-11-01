@@ -25,14 +25,14 @@ type recorder struct {
 	onEach func(n int)
 }
 
-func (r *recorder) PublishEvent(_ context.Context, e *events.GitHubEvent) error {
+func (r *recorder) Publish(_ context.Context, e *events.GitHubEvent) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.ids = append(r.ids, e.ID)
 	if r.onEach != nil {
 		r.onEach(len(r.ids))
 	}
-	return nil
+	return false, nil
 }
 
 func (r *recorder) list() []string {

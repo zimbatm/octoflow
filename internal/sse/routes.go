@@ -1,7 +1,6 @@
 package sse
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,13 +21,8 @@ func Routes(h *Handler, prefix string) http.Handler {
 	})
 
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
-		stats, err := json.Marshal(h.GetStats())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(stats)
+		_, _ = fmt.Fprintf(w, `{"total_clients":%d}`, h.Clients())
 	})
 
 	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +93,7 @@ func Routes(h *Handler, prefix string) http.Handler {
 }
 
 func serve(h *Handler, w http.ResponseWriter, r *http.Request, streamID string, subjects []string) {
-	h.ServeHTTP(w, r, streamID, subjects, filterFromQuery(r))
+	h.Stream(w, r, streamID, subjects, filterFromQuery(r))
 }
 
 // cors lets browsers on other origins read the streams. The data is public.

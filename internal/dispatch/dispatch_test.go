@@ -152,7 +152,7 @@ func TestDispatchStoresCopiesOnce(t *testing.T) {
 	if err := json.Unmarshal(data, &ev); err != nil {
 		t.Fatal(err)
 	}
-	if err := pub.PublishEvent(ctx, &ev); err != nil {
+	if _, err := pub.Publish(ctx, &ev); err != nil {
 		t.Fatal(err)
 	}
 

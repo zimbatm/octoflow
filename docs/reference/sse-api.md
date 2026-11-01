@@ -23,7 +23,7 @@ anything else is a 404.
 
 | Route | Answers |
 |---|---|
-| `/stats` | JSON: `total_clients`, `total_events` sent to the clients now connected, `clients_by_stream` by route id such as `org-222` |
+| `/stats` | JSON: `{"total_clients": N}`, the open connections of this process |
 | `/health` | `{"status":"healthy","service":"sse-server"}` |
 
 ## Query parameters

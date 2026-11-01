@@ -15,6 +15,10 @@ import (
 // streamLabel is the fixed value of the metrics' stream label.
 const streamLabel = "events"
 
+// publishTimeout bounds one publish, on top of whatever deadline the
+// caller's context carries.
+const publishTimeout = 10 * time.Second
+
 // Publisher publishes events to the JetStream stream over a connection the
 // caller owns.
 type Publisher struct {
@@ -26,19 +30,13 @@ func NewPublisher(js nats.JetStreamContext, cfg *config.NATSConfig) *Publisher {
 	return &Publisher{prefix: cfg.SubjectPrefix, js: js}
 }
 
-// PublishEvent publishes a GitHub event under its org or global subject,
-// with event.ID as the deduplication id.
-func (p *Publisher) PublishEvent(ctx context.Context, event *events.GitHubEvent) error {
-	_, err := p.Publish(ctx, event)
-	return err
-}
-
-// Publish is PublishEvent that also reports whether the stream already
-// held a message with this id and dropped the new one.
+// Publish stores a GitHub event under its org or global subject with
+// event.ID as the deduplication id, and reports whether the stream already
+// held that id and dropped the message.
 func (p *Publisher) Publish(ctx context.Context, event *events.GitHubEvent) (duplicate bool, err error) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		metrics.RecordNATSPublish(streamLabel, event.Event, "marshal_error", 0)
+		p.record(event.Event, "marshal_error", 0)
 		return false, fmt.Errorf("failed to marshal event: %w", err)
 	}
 	ack, err := p.publish(ctx, p.Subject(event), event.Event, data, event.ID)
@@ -65,11 +63,11 @@ func (p *Publisher) PublishToSubject(ctx context.Context, subject, eventType str
 }
 
 func (p *Publisher) publish(ctx context.Context, subject, eventType string, data []byte, msgID string) (*nats.PubAck, error) {
+	ctx, cancel := context.WithTimeout(ctx, publishTimeout)
+	defer cancel()
 	start := time.Now()
 	status := "success"
-	defer func() {
-		metrics.RecordNATSPublish(streamLabel, eventType, status, time.Since(start).Seconds())
-	}()
+	defer func() { p.record(eventType, status, time.Since(start)) }()
 
 	future, err := p.js.PublishAsync(subject, data, nats.MsgId(msgID))
 	if err != nil {
@@ -86,4 +84,9 @@ func (p *Publisher) publish(ctx context.Context, subject, eventType string, data
 		status = "timeout"
 		return nil, ctx.Err()
 	}
+}
+
+func (p *Publisher) record(eventType, status string, d time.Duration) {
+	metrics.NATSPublishedEvents.WithLabelValues(streamLabel, eventType, status).Inc()
+	metrics.NATSPublishDuration.WithLabelValues(streamLabel).Observe(d.Seconds())
 }

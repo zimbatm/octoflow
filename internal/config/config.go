@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,7 +19,6 @@ type Config struct {
 	SSE          SSEConfig
 	Dashboard    DashboardConfig
 	PublicIngest PublicIngestConfig
-	Processing   ProcessingConfig
 	Log          LogConfig
 	Metrics      MetricsConfig
 }
@@ -32,7 +33,6 @@ type WebhookConfig struct {
 	RequestTimeout time.Duration
 	// empty allows every organization
 	AllowedOrgs []string
-	HealthPath  string
 }
 
 type LogConfig struct {
@@ -109,14 +109,32 @@ type PublicIngestConfig struct {
 	GHArchiveStart time.Time
 }
 
-type ProcessingConfig struct {
-	// pull workers per durable consumer in the dispatcher and the s3-worker
-	NumWorkers int
-}
-
 // LoadFromEnv reads the environment. It does not check the S3 settings;
-// only the s3-worker needs them, see S3Config.Validate.
+// only the s3 service needs them, see S3Config.Validate.
 func LoadFromEnv() (*Config, error) {
+	replicas, err := envParse("NATS_STREAM_REPLICAS", 1, strconv.Atoi)
+	if err != nil {
+		return nil, err
+	}
+	pollInterval, err := envParse("EVENTS_API_INTERVAL", time.Minute, time.ParseDuration)
+	if err != nil {
+		return nil, err
+	}
+	archiveStart, err := envParse("GHARCHIVE_START", time.Time{}, func(s string) (time.Time, error) {
+		return time.Parse(time.RFC3339, s)
+	})
+	if err != nil {
+		return nil, err
+	}
+	logFormat, err := envParse("LOG_FORMAT", "text", oneOf("text", "json"))
+	if err != nil {
+		return nil, err
+	}
+	logLevel, err := envParse("LOG_LEVEL", "info", oneOf("debug", "info", "warn", "error"))
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		Webhook: WebhookConfig{
 			ListenAddr:     getEnvOrDefault("WEBHOOK_LISTEN_ADDR", ":8080"),
@@ -125,13 +143,12 @@ func LoadFromEnv() (*Config, error) {
 			MaxPayloadSize: 25 << 20,
 			RequestTimeout: 10 * time.Second,
 			AllowedOrgs:    splitList(os.Getenv("WEBHOOK_ALLOWED_ORGS")),
-			HealthPath:     "/health",
 		},
 		NATS: NATSConfig{
 			Servers:           []string{getEnvOrDefault("NATS_URL", "nats://localhost:4222")},
 			SubjectPrefix:     getEnvOrDefault("NATS_SUBJECT_PREFIX", "github.events"),
 			StreamName:        getEnvOrDefault("NATS_STREAM_NAME", "GITHUB_EVENTS_RAW"),
-			StreamReplicas:    1,
+			StreamReplicas:    replicas,
 			StreamMaxAge:      7 * 24 * time.Hour,
 			MaxReconnects:     10,
 			ReconnectWait:     2 * time.Second,
@@ -165,55 +182,14 @@ func LoadFromEnv() (*Config, error) {
 			Repos:             splitList(os.Getenv("PUBLIC_REPOS")),
 			GitHubToken:       os.Getenv("GITHUB_TOKEN"),
 			EventsAPI:         envBool("EVENTS_API_ENABLED", true),
-			EventsAPIInterval: time.Minute,
+			EventsAPIInterval: pollInterval,
 			GHArchive:         envBool("GHARCHIVE_ENABLED", true),
 			GHArchiveURL:      getEnvOrDefault("GHARCHIVE_URL", "https://data.gharchive.org"),
+			GHArchiveStart:    archiveStart,
 		},
-		Processing: ProcessingConfig{
-			NumWorkers: 10,
-		},
-		Log: LogConfig{
-			Format: getEnvOrDefault("LOG_FORMAT", "text"),
-			Level:  getEnvOrDefault("LOG_LEVEL", "info"),
-		},
-		Metrics: MetricsConfig{
-			ListenAddr: os.Getenv("METRICS_LISTEN_ADDR"),
-		},
+		Log:     LogConfig{Format: logFormat, Level: logLevel},
+		Metrics: MetricsConfig{ListenAddr: os.Getenv("METRICS_LISTEN_ADDR")},
 	}
-
-	switch cfg.Log.Format {
-	case "text", "json":
-	default:
-		return nil, fmt.Errorf("LOG_FORMAT must be text or json, got %q", cfg.Log.Format)
-	}
-	switch cfg.Log.Level {
-	case "debug", "info", "warn", "error":
-	default:
-		return nil, fmt.Errorf("LOG_LEVEL must be debug, info, warn or error, got %q", cfg.Log.Level)
-	}
-
-	if s := os.Getenv("NATS_STREAM_REPLICAS"); s != "" {
-		n, err := strconv.Atoi(s)
-		if err != nil {
-			return nil, fmt.Errorf("NATS_STREAM_REPLICAS: %w", err)
-		}
-		cfg.NATS.StreamReplicas = n
-	}
-	if s := os.Getenv("EVENTS_API_INTERVAL"); s != "" {
-		d, err := time.ParseDuration(s)
-		if err != nil {
-			return nil, fmt.Errorf("EVENTS_API_INTERVAL: %w", err)
-		}
-		cfg.PublicIngest.EventsAPIInterval = d
-	}
-	if s := os.Getenv("GHARCHIVE_START"); s != "" {
-		t, err := time.Parse(time.RFC3339, s)
-		if err != nil {
-			return nil, fmt.Errorf("GHARCHIVE_START: %w", err)
-		}
-		cfg.PublicIngest.GHArchiveStart = t
-	}
-
 	return cfg, nil
 }
 
@@ -232,6 +208,29 @@ func envBool(key string, def bool) bool {
 	return b
 }
 
+// envParse returns def when key is unset, else parse(value); a parse
+// error names the variable.
+func envParse[T any](key string, def T, parse func(string) (T, error)) (T, error) {
+	s := os.Getenv(key)
+	if s == "" {
+		return def, nil
+	}
+	v, err := parse(s)
+	if err != nil {
+		return def, fmt.Errorf("%s: %w", key, err)
+	}
+	return v, nil
+}
+
+func oneOf(allowed ...string) func(string) (string, error) {
+	return func(s string) (string, error) {
+		if slices.Contains(allowed, s) {
+			return s, nil
+		}
+		return "", fmt.Errorf("must be one of %s, got %q", strings.Join(allowed, ", "), s)
+	}
+}
+
 func splitList(s string) []string {
 	var out []string
 	for _, p := range strings.Split(s, ",") {
@@ -242,10 +241,10 @@ func splitList(s string) []string {
 	return out
 }
 
-// Validate reports missing settings. Only the s3-worker needs S3, so LoadFromEnv does not call it.
+// Validate reports missing settings. Only the s3 service needs S3, so LoadFromEnv does not call it.
 func (c *S3Config) Validate() error {
 	if c.Bucket == "" {
-		return fmt.Errorf("S3_BUCKET environment variable is required")
+		return errors.New("S3_BUCKET environment variable is required")
 	}
 	return nil
 }

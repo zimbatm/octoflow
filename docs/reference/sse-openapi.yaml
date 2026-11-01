@@ -309,16 +309,6 @@ components:
       properties:
         total_clients:
           type: integer
-        total_events:
-          type: integer
-          description: Events sent to the clients currently connected
-        clients_by_stream:
-          type: object
-          additionalProperties:
-            type: integer
+          description: Open SSE connections of this process
       example:
         total_clients: 3
-        total_events: 1234
-        clients_by_stream:
-          all: 1
-          org-487568: 2

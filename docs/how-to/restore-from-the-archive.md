@@ -67,6 +67,5 @@ do not want the archive to grow.
 ## What comes back
 
 Every field of the event, including `metadata` for public-ingest events.
-Files written before the `metadata` column existed (before 2026-11-01)
-restore without it. Fan-out copies are not archived; the dispatcher
+Fan-out copies are not archived; the dispatcher
 recreates them from the restored primary events.

@@ -89,10 +89,7 @@ func runS3(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) er
 		return fmt.Errorf("failed to create consumer: %w", err)
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {
@@ -115,7 +112,6 @@ func runS3(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) er
 			natsInternal.AckOrNak(msg, err)
 		})
 	})
-	wg.Wait()
 
 	// acks through the connection, which main closes only after this returns.
 	writer.Flush()
@@ -125,7 +121,7 @@ func runS3(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) er
 func runSSE(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {
 	srv := &http.Server{
 		Addr:              cfg.SSE.ListenAddr,
-		Handler:           sse.Routes(sse.NewHandler(js, &cfg.NATS), cfg.NATS.SubjectPrefix),
+		Handler:           sse.Routes(sse.NewHandler(js, cfg.NATS.StreamName), cfg.NATS.SubjectPrefix),
 		ReadHeaderTimeout: 5 * time.Second,
 		// streams stay open: no write or idle timeout.
 	}
@@ -152,7 +148,7 @@ func runDashboard(ctx context.Context, cfg *config.Config, _ nats.JetStreamConte
 
 func runPublicIngest(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {
 	pc := &cfg.PublicIngest
-	if len(pc.Repos) == 0 {
+	if !publicIngestEnabled(cfg) {
 		return errors.New("PUBLIC_REPOS is required, for example PUBLIC_REPOS=NixOS/nixpkgs")
 	}
 	state, err := publicingest.OpenState(js, cfg.NATS.StreamReplicas)

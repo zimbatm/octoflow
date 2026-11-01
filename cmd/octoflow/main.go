@@ -1,6 +1,7 @@
 // octoflow runs one service per invocation, or all of them in one process.
 //
 //	octoflow webhook|dispatcher|s3|sse|dashboard|public-ingest|all|version
+//	octoflow restore --from YYYY-MM-DD ...
 package main
 
 import (
@@ -13,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -26,21 +28,30 @@ import (
 // version is set at build time with -ldflags "-X main.version=...".
 var version = "dev"
 
+// numWorkers is how many goroutines pull from a durable consumer.
+const numWorkers = 10
+
 type service struct {
 	name string
 	// nats is false for services that never talk to the stream.
 	nats bool
-	run  func(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error
+	// enabled says whether `all` runs the service with this configuration;
+	// nil means always.
+	enabled func(*config.Config) bool
+	run     func(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error
 }
 
 var services = []service{
-	{"webhook", true, runWebhook},
-	{"dispatcher", true, runDispatcher},
-	{"s3", true, runS3},
-	{"sse", true, runSSE},
-	{"dashboard", false, runDashboard},
-	{"public-ingest", true, runPublicIngest},
+	{"webhook", true, nil, runWebhook},
+	{"dispatcher", true, nil, runDispatcher},
+	{"s3", true, s3Enabled, runS3},
+	{"sse", true, nil, runSSE},
+	{"dashboard", false, nil, runDashboard},
+	{"public-ingest", true, publicIngestEnabled, runPublicIngest},
 }
+
+func s3Enabled(cfg *config.Config) bool           { return cfg.S3.Bucket != "" }
+func publicIngestEnabled(cfg *config.Config) bool { return len(cfg.PublicIngest.Repos) > 0 }
 
 func main() {
 	if len(os.Args) < 2 {
@@ -76,40 +87,30 @@ func main() {
 
 	var js nats.JetStreamContext
 	if needsNATS(selected) {
-		nc, err := natsInternal.Connect(&cfg.NATS)
+		nc, j, err := natsInternal.ConnectJetStream(&cfg.NATS)
 		if err != nil {
 			fatal("Failed to connect to NATS", err)
 		}
 		// closed after every service returned: the s3 service acks in its final flush.
 		defer nc.Close()
-		js, err = nc.JetStream()
-		if err != nil {
-			fatal("Failed to create JetStream context", err)
-		}
-		if err := natsInternal.EnsureStream(js, &cfg.NATS); err != nil {
-			fatal("Failed to initialize NATS stream", err)
-		}
+		js = j
 	}
 
 	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var failures []error
+	var failed atomic.Bool
 	start := func(name string, run func() error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			if err := run(); err != nil {
 				slog.Error("Service failed", "service", name, "error", err)
-				mu.Lock()
-				failures = append(failures, fmt.Errorf("%s: %w", name, err))
-				mu.Unlock()
+				failed.Store(true)
 				stop()
 			}
 			slog.Info("Service stopped", "service", name)
 		}()
 	}
 	for _, s := range selected {
-		s := s
 		slog.Info("Starting service", "service", s.name)
 		start(s.name, func() error { return s.run(ctx, cfg, js) })
 	}
@@ -123,8 +124,7 @@ func main() {
 	<-ctx.Done()
 	slog.Info("Shutting down")
 	wg.Wait()
-
-	if len(failures) > 0 {
+	if failed.Load() {
 		os.Exit(1)
 	}
 	slog.Info("Shutdown complete")
@@ -161,17 +161,9 @@ func pick(name string, cfg *config.Config) ([]service, error) {
 	if name == "all" {
 		var out []service
 		for _, s := range services {
-			switch s.name {
-			case "s3":
-				if cfg.S3.Bucket == "" {
-					continue
-				}
-			case "public-ingest":
-				if len(cfg.PublicIngest.Repos) == 0 {
-					continue
-				}
+			if s.enabled == nil || s.enabled(cfg) {
+				out = append(out, s)
 			}
-			out = append(out, s)
 		}
 		return out, nil
 	}
@@ -252,11 +244,11 @@ func serveHTTP(ctx context.Context, srv *http.Server) error {
 	}
 }
 
-// pullLoop fetches from a durable pull consumer with NumWorkers goroutines
+// pullLoop fetches from a durable pull consumer with numWorkers goroutines
 // and hands each message to handle, until ctx ends and the workers return.
 func pullLoop(ctx context.Context, cfg *config.Config, js nats.JetStreamContext, consumer string, handle func(*nats.Msg)) {
 	var wg sync.WaitGroup
-	for i := 0; i < cfg.Processing.NumWorkers; i++ {
+	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func(workerID int) {
 			defer wg.Done()

@@ -179,7 +179,10 @@ func (w *S3Writer) flushLocked() {
 		status = "upload_error"
 		slog.Error("Failed to write batch to S3", "event_count", eventCount, "error", err)
 	}
-	metrics.RecordS3Write(status, eventCount, batchSize, w.now().Sub(start).Seconds())
+	metrics.S3BatchesWritten.WithLabelValues(status).Inc()
+	metrics.S3EventsPerBatch.Observe(float64(eventCount))
+	metrics.S3BatchSize.Observe(float64(batchSize))
+	metrics.S3WriteDuration.Observe(w.now().Sub(start).Seconds())
 
 	for _, done := range w.done {
 		done(err)

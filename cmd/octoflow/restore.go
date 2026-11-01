@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -16,7 +15,6 @@ import (
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
 	"github.com/zimbatm/octoflow/internal/restore"
 	"github.com/zimbatm/octoflow/internal/storage"
-	"github.com/zimbatm/octoflow/pkg/events"
 )
 
 // runRestore is the restore subcommand. It returns the exit status.
@@ -31,86 +29,67 @@ func runRestore(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *from == "" {
-		fmt.Fprintln(os.Stderr, "octoflow restore: --from is required")
+	usageErr := func(msg string, err error) int {
+		fmt.Fprintln(os.Stderr, "octoflow restore:", msg, err)
 		fs.Usage()
 		return 2
 	}
 
-	cfg, err := config.LoadFromEnv()
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to load configuration:", err)
-		return 1
+	opts := restore.Options{RepoID: *repo, OrgID: *org, To: time.Now().UTC()}
+	var err error
+	if *from == "" {
+		return usageErr("--from is required", nil)
 	}
-	setupLogging(cfg.Log)
-
-	opts := restore.Options{KeyPrefix: cfg.S3.KeyPrefix, RepoID: *repo, OrgID: *org, DryRun: *dryRun}
-	if opts.From, err = time.Parse("2006-01-02", *from); err != nil {
-		fmt.Fprintln(os.Stderr, "octoflow restore: --from:", err)
-		return 2
+	if opts.From, err = time.Parse(time.DateOnly, *from); err != nil {
+		return usageErr("--from:", err)
 	}
-	opts.To = time.Now().UTC()
 	if *to != "" {
-		if opts.To, err = time.Parse("2006-01-02", *to); err != nil {
-			fmt.Fprintln(os.Stderr, "octoflow restore: --to:", err)
-			return 2
+		if opts.To, err = time.Parse(time.DateOnly, *to); err != nil {
+			return usageErr("--to:", err)
 		}
 	}
 	if opts.To.Before(opts.From) {
-		fmt.Fprintln(os.Stderr, "octoflow restore: --to is before --from")
-		return 2
+		return usageErr("--to is before --from", nil)
 	}
 	if *eventTypes != "" {
 		opts.Events = strings.Split(*eventTypes, ",")
 	}
+
+	cfg, err := config.LoadFromEnv()
+	if err != nil {
+		fatal("Failed to load configuration", err)
+	}
+	setupLogging(cfg.Log)
+	opts.KeyPrefix = cfg.S3.KeyPrefix
 	if err := cfg.S3.Validate(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		fatal("Invalid S3 configuration", err)
 	}
 	store, err := storage.NewObjectStore(&cfg.S3)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
+		fatal("Failed to open the archive", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	var pub restore.Publisher = noPublisher{}
+	var pub restore.Publisher
 	if !*dryRun {
-		nc, err := natsInternal.Connect(&cfg.NATS)
+		nc, js, err := natsInternal.ConnectJetStream(&cfg.NATS)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to connect to NATS:", err)
-			return 1
+			fatal("Failed to connect to NATS", err)
 		}
 		defer nc.Close()
-		js, err := nc.JetStream()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to create JetStream context:", err)
-			return 1
-		}
-		if err := natsInternal.EnsureStream(js, &cfg.NATS); err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to initialize NATS stream:", err)
-			return 1
-		}
 		pub = natsInternal.NewPublisher(js, &cfg.NATS)
 	}
 
 	slog.Info("Restoring from the archive", "bucket", cfg.S3.Bucket, "prefix", opts.KeyPrefix,
-		"from", opts.From.Format("2006-01-02"), "to", opts.To.Format("2006-01-02"), "dry_run", *dryRun)
+		"from", opts.From.Format(time.DateOnly), "to", opts.To.Format(time.DateOnly), "dry_run", *dryRun)
 	st, err := restore.Run(ctx, store, pub, opts)
 	fmt.Printf("restore: files=%d rows=%d matched=%d published=%d duplicates=%d\n",
 		st.Files, st.Rows, st.Matched, st.Published, st.Duplicates)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Restore stopped:", err)
+		slog.Error("Restore stopped", "error", err)
 		return 1
 	}
 	return 0
-}
-
-// noPublisher stands in during a dry run, which never publishes.
-type noPublisher struct{}
-
-func (noPublisher) Publish(context.Context, *events.GitHubEvent) (bool, error) {
-	return false, errors.New("dry run")
 }

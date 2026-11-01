@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"time"
 
 	"github.com/zimbatm/octoflow/pkg/events"
 )
@@ -63,8 +62,6 @@ func Dispatch(ctx context.Context, pub Publisher, prefix string, data []byte) (i
 
 	subjects := Subjects(prefix, &event, entities)
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
 	for _, subject := range subjects {
 		// the stream deduplicates by message id across all subjects, so reusing
 		// event.ID here would drop every copy as a duplicate of the original.
