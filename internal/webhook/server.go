@@ -15,7 +15,6 @@ import (
 type Server struct {
 	config     *config.WebhookConfig
 	httpServer *http.Server
-	handler    *Handler
 }
 
 // NewServer creates a new webhook server
@@ -39,8 +38,7 @@ func NewServer(cfg *config.WebhookConfig, publisher Publisher) *Server {
 	}
 
 	return &Server{
-		config:  cfg,
-		handler: handler,
+		config: cfg,
 		httpServer: &http.Server{
 			Addr:        cfg.ListenAddr,
 			Handler:     mux,

@@ -71,7 +71,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		status = "read_error"
 		return
 	}
-	defer r.Body.Close()
 	payloadSize = len(body)
 
 	// Extract GitHub headers
@@ -90,11 +89,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Validate signature
 	if !h.validateSignature(body, signature) {
-		if h.config.Secret == "" && signature != "" {
-			slog.Warn("Webhook signature provided but no secret configured",
-				"delivery_id", deliveryID,
-				"hint", "Set WEBHOOK_SECRET environment variable")
-		}
 		http.Error(w, "Invalid signature", http.StatusUnauthorized)
 		status = "invalid_signature"
 		return
