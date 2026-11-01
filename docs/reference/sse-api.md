@@ -1,6 +1,7 @@
 # SSE API
 
-Served by `octoflow sse` on `SSE_LISTEN_ADDR` (`:8081`). Machine-readable
+Served by `octoflow sse` on `HTTP_LISTEN_ADDR` (`:8080`), next to the
+webhook and the dashboard, or on `SSE_LISTEN_ADDR` when set. Machine-readable
 version: [sse-openapi.yaml](sse-openapi.yaml).
 
 ## Routes
@@ -24,7 +25,7 @@ anything else is a 404.
 | Route | Answers |
 |---|---|
 | `/stats` | JSON: `{"total_clients": N}`, the open connections of this process |
-| `/health` | `{"status":"healthy","service":"sse-server"}` |
+| `/health` | `{"status":"healthy"}`; shared by every service on the address |
 
 ## Query parameters
 
@@ -50,6 +51,8 @@ JetStream.
 
 ## Behaviour
 
+- At most `SSE_MAX_CLIENTS` (1000) streams per process; beyond that a
+  request gets a 503.
 - Each connection gets its own JetStream consumer, deleted when the
   connection ends and in any case one minute after it goes idle.
 - `last=N` counts only messages that match the route's subjects, found

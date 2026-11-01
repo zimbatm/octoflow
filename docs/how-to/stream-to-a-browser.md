@@ -53,11 +53,11 @@ long; the NixOS module sets this.
 ## 5. Try it from the shell
 
 ```bash
-curl -N 'http://localhost:8081/events?last=3'
-curl -N -H 'Last-Event-ID: 42' 'http://localhost:8081/events/org/222'
-curl http://localhost:8081/stats
+curl -N 'http://localhost:8080/events?last=3'
+curl -N -H 'Last-Event-ID: 42' 'http://localhost:8080/events/org/222'
+curl http://localhost:8080/stats
 ```
 
 The dashboard in `web/index.html` is a complete client; serve it with
 `octoflow dashboard` or any static file server. It finds the SSE server
-from its own address, or takes `?sse=https://host` in the page URL.
+from its own origin, or takes `?sse=https://host` in the page URL.

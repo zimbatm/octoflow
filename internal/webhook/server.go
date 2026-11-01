@@ -3,42 +3,21 @@ package webhook
 import (
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/zimbatm/octoflow/internal/config"
 )
 
-// NewServer returns the receiver's HTTP server, ready for ListenAndServe.
-func NewServer(cfg *config.WebhookConfig, publisher Publisher) *http.Server {
-	mux := http.NewServeMux()
+// Routes registers the receiver on mux: deliveries on POST /webhook, and a
+// help page on GET /webhook for whoever opens the URL in a browser.
+func Routes(mux *http.ServeMux, cfg *config.WebhookConfig, publisher Publisher) {
 	mux.Handle("POST /webhook", NewHandler(cfg, publisher))
-	mux.HandleFunc("GET /{$}", rootHandler)
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, `{"status":"healthy","service":"webhook-receiver"}`)
-	})
-
-	return &http.Server{
-		Addr:              cfg.ListenAddr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
-		// a 25 MB payload on a slow link needs longer than the publish timeout.
-		ReadTimeout: time.Minute,
-		// leave room to write the 503 after a publish times out.
-		WriteTimeout: time.Minute + cfg.RequestTimeout + 5*time.Second,
-		IdleTimeout:  120 * time.Second,
-	}
+	mux.HandleFunc("GET /webhook", helpHandler)
 }
 
-// rootHandler tells a browser what this endpoint is and how to configure GitHub.
-func rootHandler(w http.ResponseWriter, r *http.Request) {
+func helpHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, `{
   "service": "octoflow-webhook-receiver",
   "description": "GitHub webhook receiver for the octoflow event pipeline",
-  "endpoints": {
-    "/": "This help message",
-    "/webhook": "GitHub webhook endpoint (POST)",
-    "/health": "Health check endpoint (GET)"
-  },
   "github_setup": {
     "payload_url": "https://your-domain.com/webhook",
     "content_type": "application/json",

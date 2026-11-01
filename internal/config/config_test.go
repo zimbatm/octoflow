@@ -20,8 +20,8 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 	if cfg.NATS.StreamName != "GITHUB_EVENTS_RAW" {
 		t.Errorf("Expected stream name GITHUB_EVENTS_RAW, got %s", cfg.NATS.StreamName)
 	}
-	if cfg.SSE.ListenAddr != ":8081" {
-		t.Errorf("Expected SSE listen addr :8081, got %s", cfg.SSE.ListenAddr)
+	if cfg.SSE.ListenAddr != ":8080" || cfg.Dashboard.ListenAddr != ":8080" {
+		t.Errorf("SSE and dashboard must share :8080 by default, got %s and %s", cfg.SSE.ListenAddr, cfg.Dashboard.ListenAddr)
 	}
 	if err := cfg.S3.Validate(); err == nil {
 		t.Error("Expected S3 validation error when S3_BUCKET is missing")
@@ -29,6 +29,7 @@ func TestLoadFromEnvDefaults(t *testing.T) {
 }
 
 func TestLoadFromEnvOverrides(t *testing.T) {
+	t.Setenv("HTTP_LISTEN_ADDR", ":7070")
 	t.Setenv("WEBHOOK_LISTEN_ADDR", ":9090")
 	t.Setenv("WEBHOOK_SECRET", "my-secret")
 	t.Setenv("NATS_URL", "nats://custom:4222")

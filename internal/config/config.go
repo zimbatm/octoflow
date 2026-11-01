@@ -89,6 +89,8 @@ type S3Config struct {
 
 type SSEConfig struct {
 	ListenAddr string
+	// open streams beyond it get a 503; each one holds a JetStream consumer
+	MaxClients int
 }
 
 type DashboardConfig struct {
@@ -140,10 +142,20 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxClients, err := envParse("SSE_MAX_CLIENTS", 1000, strconv.Atoi)
+	if err != nil {
+		return nil, err
+	}
+	// the webhook, SSE and dashboard routes share one server unless a
+	// service is given its own address.
+	httpAddr := getEnvOrDefault("HTTP_LISTEN_ADDR", ":8080")
+	if err != nil {
+		return nil, err
+	}
 
 	cfg := &Config{
 		Webhook: WebhookConfig{
-			ListenAddr:     getEnvOrDefault("WEBHOOK_LISTEN_ADDR", ":8080"),
+			ListenAddr:     getEnvOrDefault("WEBHOOK_LISTEN_ADDR", httpAddr),
 			Secret:         os.Getenv("WEBHOOK_SECRET"),
 			AllowUnsigned:  envBool("WEBHOOK_ALLOW_UNSIGNED", false),
 			MaxPayloadSize: 25 << 20,
@@ -179,10 +191,11 @@ func LoadFromEnv() (*Config, error) {
 			Endpoint:        os.Getenv("S3_ENDPOINT"),
 		},
 		SSE: SSEConfig{
-			ListenAddr: getEnvOrDefault("SSE_LISTEN_ADDR", ":8081"),
+			ListenAddr: getEnvOrDefault("SSE_LISTEN_ADDR", httpAddr),
+			MaxClients: maxClients,
 		},
 		Dashboard: DashboardConfig{
-			ListenAddr: getEnvOrDefault("DASHBOARD_LISTEN_ADDR", ":8082"),
+			ListenAddr: getEnvOrDefault("DASHBOARD_LISTEN_ADDR", httpAddr),
 			WebDir:     getEnvOrDefault("WEB_DIR", "./web"),
 		},
 		PublicIngest: PublicIngestConfig{

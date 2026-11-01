@@ -35,10 +35,10 @@ make run                    # NATS, rustfs and every service under hivemind
 # in a second shell
 WEBHOOK_SECRET=change-me ./scripts/test-webhook.sh
 nats sub "github.events.>"
-curl -N 'http://localhost:8081/events?last=5'
+curl -N 'http://localhost:8080/events?last=5'
 ```
 
-The dashboard is at http://localhost:8082. [Your first
+The dashboard is at http://localhost:8080. [Your first
 events](docs/tutorials/first-events.md) walks through this in detail.
 
 ## Documentation

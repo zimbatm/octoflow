@@ -34,14 +34,14 @@ nix develop
 make run
 ```
 
-Hivemind starts NATS, rustfs and one process per service. After a few
+Hivemind starts NATS, rustfs and one `octoflow all` process. After a few
 seconds you see lines like these:
 
 ```
-webhook    | ... msg="Webhook receiver listening" address=:8080
-dispatcher | ... msg="Worker started" ...
-sse        | ... msg="SSE server listening" address=:8081
-s3         | ... msg="Created stream" name=GITHUB_EVENTS_RAW subjects=[github.events.>]
+octoflow | ... msg="Created stream" name=GITHUB_EVENTS_RAW subjects=[github.events.>]
+octoflow | ... msg="HTTP listening" address=:8080
+octoflow | ... msg="Starting service" service=dispatcher
+octoflow | ... msg="Starting service" service=s3
 ```
 
 Keep this terminal open. Everything below happens in a second
@@ -104,7 +104,7 @@ The SSE server replays the last events of any route and then streams new
 ones:
 
 ```bash
-curl -N 'http://localhost:8081/events/repo/111?last=5'
+curl -N 'http://localhost:8080/events/repo/111?last=5'
 ```
 
 ```
@@ -120,7 +120,7 @@ data: {"id":"test-...","event":"pull_request","action":"opened",...}
 
 The `id` is the JetStream sequence. A browser sends it back as
 `Last-Event-ID` when it reconnects, and the stream resumes after it.
-Stop curl with Ctrl-C, then open http://localhost:8082 to see the same
+Stop curl with Ctrl-C, then open http://localhost:8080 to see the same
 stream in the dashboard.
 
 ## 6. See the archive being written

@@ -2,7 +2,6 @@ package sse
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 
@@ -10,26 +9,24 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// Routes serves the SSE endpoints, /health and /stats. Every id in a path
+// Routes registers the SSE endpoints and /stats on mux. Every id in a path
 // must be numeric; a subject may not take wildcards from a client.
-func Routes(h *Handler, prefix string) http.Handler {
-	mux := http.NewServeMux()
+func Routes(mux *http.ServeMux, h *Handler, prefix string) {
+	get := func(pattern string, fn http.HandlerFunc) {
+		mux.Handle("GET "+pattern, cors(fn))
+		mux.Handle("OPTIONS "+pattern, cors(nil))
+	}
 
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"status":"healthy","service":"sse-server"}`)
-	})
-
-	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
+	get("/stats", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprintf(w, `{"total_clients":%d}`, h.Clients())
 	})
 
-	mux.HandleFunc("GET /events", func(w http.ResponseWriter, r *http.Request) {
+	get("/events", func(w http.ResponseWriter, r *http.Request) {
 		serve(h, w, r, "all", natsInternal.PrimarySubjects(prefix))
 	})
 
-	mux.HandleFunc("GET /events/org/{org_id}", func(w http.ResponseWriter, r *http.Request) {
+	get("/events/org/{org_id}", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := numeric(w, r, "org_id")
 		if !ok {
 			return
@@ -37,7 +34,7 @@ func Routes(h *Handler, prefix string) http.Handler {
 		serve(h, w, r, "org-"+id, []string{fmt.Sprintf("%s.org.%s.>", prefix, id)})
 	})
 
-	mux.HandleFunc("GET /events/repo/{repo_id}", func(w http.ResponseWriter, r *http.Request) {
+	get("/events/repo/{repo_id}", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := numeric(w, r, "repo_id")
 		if !ok {
 			return
@@ -45,7 +42,7 @@ func Routes(h *Handler, prefix string) http.Handler {
 		serve(h, w, r, "repo-"+id, []string{fmt.Sprintf("%s.repo.%s.>", prefix, id)})
 	})
 
-	mux.HandleFunc("GET /events/user/{user_id}", func(w http.ResponseWriter, r *http.Request) {
+	get("/events/user/{user_id}", func(w http.ResponseWriter, r *http.Request) {
 		id, ok := numeric(w, r, "user_id")
 		if !ok {
 			return
@@ -53,7 +50,7 @@ func Routes(h *Handler, prefix string) http.Handler {
 		serve(h, w, r, "user-"+id, []string{fmt.Sprintf("%s.user.%s.*", prefix, id)})
 	})
 
-	mux.HandleFunc("GET /events/pr/{repo_id}/{number}", func(w http.ResponseWriter, r *http.Request) {
+	get("/events/pr/{repo_id}/{number}", func(w http.ResponseWriter, r *http.Request) {
 		repo, ok := numeric(w, r, "repo_id")
 		if !ok {
 			return
@@ -65,7 +62,7 @@ func Routes(h *Handler, prefix string) http.Handler {
 		serve(h, w, r, "pr-"+repo+"-"+n, []string{fmt.Sprintf("%s.pr.%s.%s.>", prefix, repo, n)})
 	})
 
-	mux.HandleFunc("GET /events/issue/{repo_id}/{number}", func(w http.ResponseWriter, r *http.Request) {
+	get("/events/issue/{repo_id}/{number}", func(w http.ResponseWriter, r *http.Request) {
 		repo, ok := numeric(w, r, "repo_id")
 		if !ok {
 			return
@@ -77,7 +74,7 @@ func Routes(h *Handler, prefix string) http.Handler {
 		serve(h, w, r, "issue-"+repo+"-"+n, []string{fmt.Sprintf("%s.issue.%s.%s.>", prefix, repo, n)})
 	})
 
-	mux.HandleFunc("GET /events/type/{event_type}", func(w http.ResponseWriter, r *http.Request) {
+	get("/events/type/{event_type}", func(w http.ResponseWriter, r *http.Request) {
 		t := r.PathValue("event_type")
 		if !isEventType(t) {
 			http.NotFound(w, r)
@@ -88,21 +85,20 @@ func Routes(h *Handler, prefix string) http.Handler {
 			fmt.Sprintf("%s.global.%s", prefix, t),
 		})
 	})
-
-	return cors(mux)
 }
 
 func serve(h *Handler, w http.ResponseWriter, r *http.Request, streamID string, subjects []string) {
 	h.Stream(w, r, streamID, subjects, filterFromQuery(r))
 }
 
-// cors lets browsers on other origins read the streams. The data is public.
+// cors lets browsers on other origins read the streams; the data is
+// public. A nil next answers the preflight.
 func cors(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Cache-Control, Last-Event-ID")
-		if r.Method == http.MethodOptions {
+		if next == nil {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}

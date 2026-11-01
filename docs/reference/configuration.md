@@ -4,6 +4,16 @@ Every setting comes from the environment. `nix develop` loads `.env`
 from the repository root; `.env.example` is a template. A malformed
 value stops the process with an error naming the variable.
 
+## HTTP
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HTTP_LISTEN_ADDR` | `:8080` | One server for the webhook, the SSE routes and the dashboard, with `GET /health`. |
+| `WEBHOOK_LISTEN_ADDR`, `SSE_LISTEN_ADDR`, `DASHBOARD_LISTEN_ADDR` | `HTTP_LISTEN_ADDR` | Give a service its own server, for example to expose only `/webhook`. The NixOS module runs one process per service and sets these. |
+
+The servers have no read or write timeout, because SSE streams stay
+open; the webhook handler bounds its own requests.
+
 ## Webhook receiver
 
 | Variable | Default | Meaning |
@@ -11,10 +21,9 @@ value stops the process with an error naming the variable.
 | `WEBHOOK_SECRET` | none | GitHub webhook secret. Without it the receiver refuses to start. |
 | `WEBHOOK_ALLOW_UNSIGNED` | `false` | `true` lets the receiver start without a secret and accept unsigned deliveries. |
 | `WEBHOOK_ALLOWED_ORGS` | empty, all allowed | Comma-separated organization logins; deliveries from others get a 403. |
-| `WEBHOOK_LISTEN_ADDR` | `:8080` | |
 
 Fixed: payloads up to 25 MB, 10 s to store an event before the receiver
-answers 503, health on `/health`.
+answers 503; `GET /webhook` answers a help page.
 
 ## NATS
 
@@ -56,7 +65,8 @@ compression, row groups of 10000.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `SSE_LISTEN_ADDR` | `:8081` | |
+
+| `SSE_MAX_CLIENTS` | `1000` | Open streams per process; each holds a JetStream consumer. Beyond it a request gets a 503. `0` is unlimited. |
 
 Fixed: `?last=` defaults to 50 and is capped at 1000; heartbeat every
 30 s; a consumer per connection, removed one minute after the client
@@ -66,8 +76,7 @@ leaves.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DASHBOARD_LISTEN_ADDR` | `:8082` | |
-| `WEB_DIR` | `./web` | Directory with `index.html`. |
+| `WEB_DIR` | `./web` | Directory with `index.html`, served at `/`. |
 
 ## public-ingest
 

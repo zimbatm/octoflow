@@ -211,10 +211,10 @@ func TestHandlerRejections(t *testing.T) {
 		want    int
 	}{
 		{
-			name:   "GET is not a delivery",
+			name:   "GET is the help page, not a delivery",
 			method: "GET",
 			body:   payload,
-			want:   http.StatusMethodNotAllowed,
+			want:   http.StatusOK,
 		},
 		{
 			name:    "wrong content type",
@@ -268,7 +268,9 @@ func TestHandlerRejections(t *testing.T) {
 				tt.cfg.MaxPayloadSize = 1 << 20
 			}
 			published := make(chanPublisher, 1)
-			handler := NewServer(&tt.cfg, published).Handler
+			mux := http.NewServeMux()
+			Routes(mux, &tt.cfg, published)
+			handler := mux
 
 			method := tt.method
 			if method == "" {

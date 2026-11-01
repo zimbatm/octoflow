@@ -30,23 +30,25 @@ run `nix build`, copy the hash it prints).
 
 ## Services (`cmd/octoflow`)
 
-1. `webhook` (port 8080): validates the GitHub signature, publishes to the
+1. `webhook`: validates the GitHub signature, publishes to the
    primary subjects, replies 200 only after JetStream acked. Refuses to
    start without `WEBHOOK_SECRET` unless `WEBHOOK_ALLOW_UNSIGNED=true`.
 2. `dispatcher`: consumes the primary subjects and republishes each event
    to repo, user, pr and issue subjects (`internal/dispatch`).
 3. `s3`: batches primary events into Parquet files in S3; acks only after
    the upload (`internal/storage`).
-4. `sse` (port 8081): streams events to browsers; `Last-Event-ID` is the
+4. `sse`: streams events to browsers; `Last-Event-ID` is the
    JetStream sequence (`internal/sse`).
-5. `dashboard` (port 8082): serves `web/`; the page finds the SSE server
-   from its own address or `?sse=`.
+5. `dashboard`: serves `web/`; the page finds the SSE server
+   from its own origin or `?sse=`.
 6. `public-ingest`: reads the GitHub Events API and GH Archive for
    repositories without a webhook (`internal/publicingest`, best-effort).
 7. `restore --from DATE`: publishes archived events from S3 back into the
    stream (`internal/restore`); not a service, exits when done.
 
-`main.go` owns config, the one NATS connection, the stream, signals and
+The webhook, sse and dashboard routes share one server on
+`HTTP_LISTEN_ADDR` (:8080) with `GET /health`; `*_LISTEN_ADDR` moves a
+service to its own server. `main.go` owns config, the one NATS connection, the stream, signals and
 shutdown; `services.go` has one `run` function per service.
 
 ## NATS subjects
@@ -97,7 +99,7 @@ NATS_URL=nats://localhost:4222
 NATS_USERNAME / NATS_PASSWORD / NATS_TOKEN / NATS_NKEY_SEED
 NATS_STREAM_REPLICAS=1        # NATS_STREAM_MAX_BYTES=10GiB caps the stream, default none
 PUBLIC_REPOS=NixOS/nixpkgs    # public-ingest only; GITHUB_TOKEN, EVENTS_API_INTERVAL, GHARCHIVE_START
-DASHBOARD_LISTEN_ADDR=:8082   # WEB_DIR=./web
+HTTP_LISTEN_ADDR=:8080        # webhook, sse and dashboard; WEBHOOK_/SSE_/DASHBOARD_LISTEN_ADDR split them; WEB_DIR=./web
 METRICS_LISTEN_ADDR=:9180     # Prometheus /metrics and /healthz; unset disables
 LOG_FORMAT=text               # or json; LOG_LEVEL=debug|info|warn|error
 ```

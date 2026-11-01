@@ -39,16 +39,21 @@ type service struct {
 	// enabled says whether `all` runs the service with this configuration;
 	// nil means always.
 	enabled func(*config.Config) bool
-	run     func(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error
+	// addr and routes describe an HTTP service; services on the same
+	// address share one server and its /health.
+	addr   func(*config.Config) string
+	routes func(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) error
+	// run is the work of the other services.
+	run func(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error
 }
 
 var services = []service{
-	{"webhook", true, nil, runWebhook},
-	{"dispatcher", true, nil, runDispatcher},
-	{"s3", true, s3Enabled, runS3},
-	{"sse", true, nil, runSSE},
-	{"dashboard", false, nil, runDashboard},
-	{"public-ingest", true, publicIngestEnabled, runPublicIngest},
+	{name: "webhook", nats: true, addr: func(c *config.Config) string { return c.Webhook.ListenAddr }, routes: webhookRoutes},
+	{name: "dispatcher", nats: true, run: runDispatcher},
+	{name: "s3", nats: true, enabled: s3Enabled, run: runS3},
+	{name: "sse", nats: true, addr: func(c *config.Config) string { return c.SSE.ListenAddr }, routes: sseRoutes},
+	{name: "dashboard", addr: func(c *config.Config) string { return c.Dashboard.ListenAddr }, routes: dashboardRoutes},
+	{name: "public-ingest", nats: true, enabled: publicIngestEnabled, run: runPublicIngest},
 }
 
 func s3Enabled(cfg *config.Config) bool           { return cfg.S3.Bucket != "" }
@@ -115,7 +120,18 @@ func main() {
 			slog.Info("Service stopped", "service", name)
 		}()
 	}
+	servers, err := httpServers(selected, cfg, js)
+	if err != nil {
+		fatal("Failed to start", err)
+	}
+	for _, srv := range servers {
+		slog.Info("HTTP listening", "address", srv.Addr)
+		start("http "+srv.Addr, func() error { return serveHTTP(ctx, srv) })
+	}
 	for _, s := range selected {
+		if s.run == nil {
+			continue
+		}
 		slog.Info("Starting service", "service", s.name)
 		start(s.name, func() error { return s.run(ctx, cfg, js) })
 	}
@@ -287,4 +303,38 @@ func terminate(msg *nats.Msg, why string, err error) {
 	if err := msg.Term(); err != nil {
 		slog.Warn("Failed to terminate message", "subject", msg.Subject, "error", err)
 	}
+}
+
+// httpServers builds one server per distinct address among the HTTP
+// services, with their routes and a shared GET /health. The servers have
+// no read or write timeout because SSE streams stay open; the webhook
+// handler sets its own deadlines.
+func httpServers(selected []service, cfg *config.Config, js nats.JetStreamContext) ([]*http.Server, error) {
+	muxes := map[string]*http.ServeMux{}
+	var servers []*http.Server
+	for _, s := range selected {
+		if s.routes == nil {
+			continue
+		}
+		addr := s.addr(cfg)
+		mux, ok := muxes[addr]
+		if !ok {
+			mux = http.NewServeMux()
+			mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"status":"healthy"}`)
+			})
+			muxes[addr] = mux
+			servers = append(servers, &http.Server{
+				Addr:              addr,
+				Handler:           mux,
+				ReadHeaderTimeout: 5 * time.Second,
+				IdleTimeout:       120 * time.Second,
+			})
+		}
+		if err := s.routes(cfg, js, mux); err != nil {
+			return nil, fmt.Errorf("%s: %w", s.name, err)
+		}
+	}
+	return servers, nil
 }

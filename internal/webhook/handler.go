@@ -50,6 +50,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		status = why
 	}
 
+	// the server has no read or write timeout, SSE streams share it; bound
+	// this request here: a 25 MB payload on a slow link needs a minute, and
+	// the 503 after a publish timeout must still get out.
+	rc := http.NewResponseController(w)
+	_ = rc.SetReadDeadline(start.Add(time.Minute))
+	_ = rc.SetWriteDeadline(start.Add(time.Minute + h.config.RequestTimeout + 5*time.Second))
+
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		fail(http.StatusBadRequest, "Content-Type must be application/json", "bad_content_type")
 		return
@@ -95,7 +102,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	organization = event.Organization
 
-	slog.Info("Received webhook event",
+	slog.Debug("Received webhook event",
 		"delivery_id", deliveryID,
 		"event_type", eventType,
 		"organization", organization,

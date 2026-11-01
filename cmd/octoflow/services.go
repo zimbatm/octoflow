@@ -25,15 +25,15 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-func runWebhook(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {
+func webhookRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) error {
 	if cfg.Webhook.Secret == "" {
 		if !cfg.Webhook.AllowUnsigned {
 			return errors.New("WEBHOOK_SECRET is not set; set it, or WEBHOOK_ALLOW_UNSIGNED=true to accept unsigned deliveries")
 		}
 		slog.Warn("WEBHOOK_SECRET is not set; unsigned deliveries are accepted")
 	}
-	slog.Info("Webhook receiver listening", "address", cfg.Webhook.ListenAddr)
-	return serveHTTP(ctx, webhook.NewServer(&cfg.Webhook, natsInternal.NewPublisher(js, &cfg.NATS)))
+	webhook.Routes(mux, &cfg.Webhook, natsInternal.NewPublisher(js, &cfg.NATS))
+	return nil
 }
 
 func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {
@@ -118,18 +118,14 @@ func runS3(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) er
 	return nil
 }
 
-func runSSE(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {
-	srv := &http.Server{
-		Addr:              cfg.SSE.ListenAddr,
-		Handler:           sse.Routes(sse.NewHandler(js, cfg.NATS.StreamName), cfg.NATS.SubjectPrefix),
-		ReadHeaderTimeout: 5 * time.Second,
-		// streams stay open: no write or idle timeout.
-	}
-	slog.Info("SSE server listening", "address", cfg.SSE.ListenAddr)
-	return serveHTTP(ctx, srv)
+func sseRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) error {
+	sse.Routes(mux, sse.NewHandler(js, cfg.NATS.StreamName, cfg.SSE.MaxClients), cfg.NATS.SubjectPrefix)
+	return nil
 }
 
-func runDashboard(ctx context.Context, cfg *config.Config, _ nats.JetStreamContext) error {
+// dashboardRoutes serves WEB_DIR at /, so it goes last on a shared mux:
+// the mux prefers the more specific patterns of the other services.
+func dashboardRoutes(cfg *config.Config, _ nats.JetStreamContext, mux *http.ServeMux) error {
 	webDir, err := filepath.Abs(cfg.Dashboard.WebDir)
 	if err != nil {
 		return err
@@ -137,13 +133,9 @@ func runDashboard(ctx context.Context, cfg *config.Config, _ nats.JetStreamConte
 	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err != nil {
 		return fmt.Errorf("WEB_DIR must hold index.html: %w", err)
 	}
-	srv := &http.Server{
-		Addr:              cfg.Dashboard.ListenAddr,
-		Handler:           http.FileServer(http.Dir(webDir)),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	slog.Info("Dashboard listening", "address", cfg.Dashboard.ListenAddr, "web_dir", webDir)
-	return serveHTTP(ctx, srv)
+	slog.Info("Dashboard served", "web_dir", webDir)
+	mux.Handle("/", http.FileServer(http.Dir(webDir)))
+	return nil
 }
 
 func runPublicIngest(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {

@@ -28,9 +28,6 @@ fi
 
 echo -e "${GREEN}✓ Webhook receiver is healthy${NC}"
 
-if ! curl -s http://localhost:8081/health > /dev/null; then
-    echo -e "${YELLOW}Warning: SSE server is not responding${NC}"
-fi
 
 # Send test webhook
 echo ""
@@ -45,7 +42,7 @@ echo ""
 echo -e "${GREEN}Services are running!${NC}"
 echo ""
 echo "You can now:"
-echo "  - View the dashboard at http://localhost:8082"
+echo "  - View the dashboard at http://localhost:8080"
 echo "  - Check NATS monitoring at http://localhost:8222"
 echo "  - Send webhooks to http://localhost:8080/webhook"
 echo ""

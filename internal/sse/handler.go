@@ -24,13 +24,16 @@ const heartbeatEvery = 30 * time.Second
 
 // Handler turns stream subjects into SSE streams.
 type Handler struct {
-	js      nats.JetStreamContext
-	stream  string
-	clients atomic.Int64
+	js     nats.JetStreamContext
+	stream string
+	// MaxClients bounds the open streams, each of which holds a JetStream
+	// consumer; 0 is unlimited. Beyond it a request gets a 503.
+	MaxClients int
+	clients    atomic.Int64
 }
 
-func NewHandler(js nats.JetStreamContext, stream string) *Handler {
-	return &Handler{js: js, stream: stream}
+func NewHandler(js nats.JetStreamContext, stream string, maxClients int) *Handler {
+	return &Handler{js: js, stream: stream, MaxClients: maxClients}
 }
 
 // Clients is the number of open streams.
@@ -51,7 +54,11 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string
 	}
 	kind, _, _ := strings.Cut(streamID, "-")
 
-	h.clients.Add(1)
+	if n := h.clients.Add(1); h.MaxClients > 0 && n > int64(h.MaxClients) {
+		h.clients.Add(-1)
+		http.Error(w, "Too many clients", http.StatusServiceUnavailable)
+		return
+	}
 	metrics.SSEClients.Set(float64(h.clients.Load()))
 	start := time.Now()
 	sent := 0

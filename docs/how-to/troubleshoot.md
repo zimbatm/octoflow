@@ -59,7 +59,7 @@ by hand. The message is terminated and no harm is done.
 
 ## SSE clients get nothing
 
-- `curl -N 'http://localhost:8081/events?last=5'` must print a
+- `curl -N 'http://localhost:8080/events?last=5'` must print a
   `connected` event at once. If not, the SSE server is down or NATS is.
 - A route with a non-numeric id answers 404.
 - Behind a proxy, buffering must be off and the read timeout long; the

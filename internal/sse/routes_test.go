@@ -27,6 +27,7 @@ type fixture struct {
 	t      *testing.T
 	js     nats.JetStreamContext
 	pub    *natsInternal.Publisher
+	h      *Handler
 	server *httptest.Server
 	seqs   map[string]uint64
 }
@@ -57,7 +58,10 @@ func newFixture(t *testing.T) *fixture {
 	add("d5", "2", "push")
 	add("d6", "1", "issues")
 
-	f.server = httptest.NewServer(Routes(NewHandler(js, "P"), "p"))
+	f.h = NewHandler(js, "P", 0)
+	mux := http.NewServeMux()
+	Routes(mux, f.h, "p")
+	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
 	return f
 }
@@ -220,9 +224,9 @@ func TestNonNumericIDsAreNotRoutes(t *testing.T) {
 	}
 }
 
-func TestStatsAndHealth(t *testing.T) {
+func TestStatsAndPreflight(t *testing.T) {
 	f := newFixture(t)
-	for _, path := range []string{"/health", "/stats"} {
+	for _, path := range []string{"/stats"} {
 		resp, err := http.Get(f.server.URL + path)
 		if err != nil {
 			t.Fatal(err)
@@ -289,5 +293,31 @@ func (f *fixture) consumerCount() int {
 			return n
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func TestMaxClients(t *testing.T) {
+	f := newFixture(t)
+	f.h.MaxClients = 1
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", f.server.URL+"/events?last=0", nil)
+	first, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Body.Close()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first stream: %d", first.StatusCode)
+	}
+	if _, code := f.read("/events/org/1?last=0", "", 0); code != http.StatusServiceUnavailable {
+		t.Errorf("second stream with MaxClients=1: %d, want 503", code)
+	}
+	cancel()
+	for deadline := time.Now().Add(5 * time.Second); f.h.Clients() > 0 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, code := f.read("/events/org/1", "", 1); code != http.StatusOK {
+		t.Errorf("after the first client left: %d, want 200", code)
 	}
 }

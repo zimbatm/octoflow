@@ -9,7 +9,7 @@ info:
     stream sequence, and whose `data` is a `GitHubEvent` JSON document.
 
 servers:
-  - url: http://localhost:8081
+  - url: http://localhost:8080
     description: Local SSE server
 
 paths:
