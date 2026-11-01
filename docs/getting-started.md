@@ -64,23 +64,23 @@ See [NATS deployment guide](https://docs.nats.io/running-a-nats-service/introduc
 Create a `.env` file:
 
 ```bash
-# Required
-S3_BUCKET=my-github-events
-
-# Recommended - get from GitHub webhook settings
+# Required by the webhook receiver; the same value goes into GitHub
 WEBHOOK_SECRET=your-webhook-secret
 
-# S3 Configuration
-AWS_ACCESS_KEY_ID=your-access-key
+# Required by the s3 service only
+S3_BUCKET=my-github-events
+AWS_ACCESS_KEY_ID=your-access-key          # unset: AWS credential chain
 AWS_SECRET_ACCESS_KEY=your-secret-key
-# For S3-compatible services (optional)
-# S3_ENDPOINT=https://s3.example.com
+# S3_ENDPOINT=https://s3.example.com       # R2, rustfs; unset for AWS
 
 # Optional overrides
 # NATS_URL=nats://localhost:4222
 # WEBHOOK_LISTEN_ADDR=:8080
 # SSE_LISTEN_ADDR=:8081
+# METRICS_LISTEN_ADDR=:9180
 ```
+
+`.env.example` lists every variable.
 
 ## Step 4: Configure GitHub Webhook
 
@@ -109,9 +109,18 @@ curl -H "Authorization: token YOUR_GITHUB_TOKEN" \
 make run
 ```
 
-This starts all components using Hivemind.
+This starts NATS, a local S3 store and every service as its own process
+under Hivemind.
 
-### Option B: Individual Services (Production)
+### Option B: One Process
+```bash
+./bin/octoflow all
+```
+
+Runs every service on one NATS connection; the s3 service only with
+`S3_BUCKET`, public-ingest only with `PUBLIC_REPOS`.
+
+### Option C: Individual Services (Production)
 ```bash
 # Terminal 1: Webhook receiver
 ./bin/octoflow webhook
@@ -125,6 +134,9 @@ This starts all components using Hivemind.
 # Terminal 4: SSE server (optional)
 ./bin/octoflow sse
 ```
+
+On NixOS, `services.octoflow` in the flake's module does this with one
+systemd unit per service; see the README.
 
 ## Step 6: Verify Setup
 
@@ -185,6 +197,8 @@ func main() {
     _, err = js.Subscribe(
         "github.events.org." + orgID + ".pull_request",
         handlePullRequest,
+        nats.Durable("slack-prs"), // survives restarts
+        nats.DeliverNew(),
     )
     if err != nil {
         log.Fatal(err)
@@ -194,20 +208,31 @@ func main() {
     select {} // Block forever
 }
 
+// prPayload is the part of the webhook payload this program reads.
+type prPayload struct {
+    PullRequest struct {
+        Title  string `json:"title"`
+        Merged bool   `json:"merged"`
+    } `json:"pull_request"`
+}
+
 func handlePullRequest(msg *nats.Msg) {
     var event events.GitHubEvent
     if err := json.Unmarshal(msg.Data, &event); err != nil {
-        log.Printf("Error parsing event: %v", err)
-        msg.Ack()
+        log.Printf("Not an event: %v", err)
+        msg.Term() // retrying cannot help
         return
     }
+    var p prPayload
+    json.Unmarshal(event.Payload, &p)
     
-    // Send to Slack based on action
     switch event.Action {
     case "opened":
-        notifySlack("New PR opened: " + event.PullRequest.Title)
-    case "merged":
-        notifySlack("PR merged: " + event.PullRequest.Title)
+        notifySlack("New PR opened: " + p.PullRequest.Title)
+    case "closed":
+        if p.PullRequest.Merged {
+            notifySlack("PR merged: " + p.PullRequest.Title)
+        }
     }
     
     msg.Ack()
@@ -229,19 +254,25 @@ func notifySlack(message string) {
 ## Troubleshooting
 
 ### Webhook not receiving events?
-- Check GitHub webhook recent deliveries for errors
-- Ensure `WEBHOOK_SECRET` matches GitHub configuration
-- Check webhook receiver logs: `docker logs webhook-receiver`
+- Check GitHub webhook recent deliveries: a 401 means the secret differs
+  from `WEBHOOK_SECRET`, a 503 means NATS did not store the event
+- Read the receiver's log (hivemind output, or
+  `journalctl -u octoflow-webhook` on NixOS)
+- `curl http://localhost:9180/metrics | grep octoflow_webhook_requests_total`
+  shows how each delivery was counted, when `METRICS_LISTEN_ADDR` is set
 
 ### Events not appearing in NATS?
 - Verify NATS is running: `nats server info`
-- Check stream exists: `nats stream list`
-- Look for errors in dispatcher logs
+- Check the stream exists: `nats stream info GITHUB_EVENTS_RAW`
+- `nats consumer info GITHUB_EVENTS_RAW event-dispatcher` shows the
+  dispatcher's backlog; look in its log for errors
 
 ### S3 uploads failing?
 - Verify S3 credentials and bucket permissions
-- Check S3 worker logs for specific errors
-- Ensure bucket exists and is accessible
+- Read the s3 service log: a failed upload is logged and the batch is
+  retried from NATS after `AckWait`
+- Ensure the bucket exists; `scripts/create-bucket.sh` makes it on the
+  local rustfs
 
 ## Support
 

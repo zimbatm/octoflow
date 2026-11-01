@@ -124,7 +124,7 @@ Progress is kept in the NATS KV bucket `octoflow_public_ingest`.
 
 - Go 1.26 (`nix develop` provides it, with NATS and rustfs)
 - NATS Server with JetStream
-- S3 bucket (AWS or compatible) for the s3-worker
+- S3 bucket (AWS or compatible) for the s3 service
 - GitHub organization webhook access
 
 ### Installation
@@ -146,7 +146,7 @@ make build
 # start, unless WEBHOOK_ALLOW_UNSIGNED=true says unsigned deliveries are wanted.
 export WEBHOOK_SECRET="your-github-secret"
 
-# Required by the s3-worker only
+# Required by the s3 service only
 export S3_BUCKET="your-bucket-name"
 
 # Optional overrides

@@ -2,12 +2,14 @@
 
 ## Subscription Cheat Sheet
 
+All ids are numeric GitHub ids; see "Finding IDs" below.
+
 ### Watch Everything
 ```bash
-# All events in your org
+# All events in your org, once each
 nats sub "github.events.org.YOUR_ORG_ID.>"
 
-# All events for a repo  
+# All events for a repo
 nats sub "github.events.repo.REPO_ID.>"
 
 # All activity by a user
@@ -16,7 +18,7 @@ nats sub "github.events.user.USER_ID.*"
 
 ### Watch Specific Events
 ```bash
-# Only pushes to main
+# Only pushes, in every repo
 nats sub "github.events.repo.*.push"
 
 # Only PR reviews
@@ -28,160 +30,156 @@ nats sub "github.events.repo.*.release"
 
 ### Watch PRs and Issues
 ```bash
-# Specific PR
-nats sub "github.events.pr.REPO_ID.PR_NUMBER"
+# One PR
+nats sub "github.events.pr.REPO_ID.PR_NUMBER.*"
 
-# All PRs in repo
-nats sub "github.events.pr.REPO_ID.>"
+# All PRs in a repo
+nats sub "github.events.pr.REPO_ID.*.*"
 
-# Specific issue
-nats sub "github.events.issue.REPO_ID.ISSUE_NUMBER"
+# One issue
+nats sub "github.events.issue.REPO_ID.ISSUE_NUMBER.*"
 ```
+
+Every fan-out subject ends in the event type, so `*` in that position
+selects every type.
 
 ## Finding IDs
 
-### Organization ID
 ```bash
-curl -H "Authorization: token YOUR_TOKEN" \
-  https://api.github.com/orgs/YOUR_ORG_NAME | jq .id
+curl -s https://api.github.com/orgs/ORG_NAME | jq .id
+curl -s https://api.github.com/repos/OWNER/REPO | jq .id
+curl -s https://api.github.com/users/USERNAME | jq .id
 ```
 
-### Repository ID  
-```bash
-curl -H "Authorization: token YOUR_TOKEN" \
-  https://api.github.com/repos/OWNER/REPO | jq .id
-```
-
-### User ID
-```bash
-curl -H "Authorization: token YOUR_TOKEN" \
-  https://api.github.com/users/USERNAME | jq .id
-```
-
-## Common Patterns
-
-### CI/CD Triggers
-```go
-// Build on push to main
-js.Subscribe("github.events.repo.*.push", func(msg *nats.Msg) {
-    var event GitHubEvent
-    json.Unmarshal(msg.Data, &event)
-    if event.Ref == "refs/heads/main" {
-        triggerBuild()
-    }
-})
-```
-
-### Security Monitoring
-```go
-// Alert on public repos
-js.Subscribe("github.events.repo.*.repository", func(msg *nats.Msg) {
-    var event GitHubEvent
-    json.Unmarshal(msg.Data, &event)
-    if event.Action == "publicized" {
-        sendAlert()
-    }
-})
-```
-
-### PR Automation
-```go
-// Auto-assign reviewers
-js.Subscribe("github.events.pr.*.*.pull_request", func(msg *nats.Msg) {
-    var event GitHubEvent
-    json.Unmarshal(msg.Data, &event)
-    if event.Action == "opened" {
-        assignReviewers(event.PullRequest)
-    }
-})
-```
+Add `-H "Authorization: Bearer TOKEN"` for private names or more than 60
+requests an hour.
 
 ## Event Structure
 
-All events follow this structure:
+Every message is a `pkg/events.GitHubEvent`:
+
 ```json
 {
-  "id": "12345678-1234-5678-1234-567812345678",
+  "id": "3fa3a85c-6a48-11f0-8793-19d640392600",
   "event": "pull_request",
   "action": "opened",
-  "organization": {"id": 12345678, "login": "myorg"},
-  "repository": {"id": 87654321, "name": "myrepo"},
-  "sender": {"id": 11111111, "login": "username"},
-  "received_at": "2025-01-26T12:00:00Z",
-  // Event-specific payload
-  "pull_request": {...},
-  "issue": {...}
+  "hook_id": "12345",
+  "received_at": "2026-10-14T12:00:00Z",
+  "repository": "numtide/octoflow",
+  "repository_id": "87654321",
+  "organization": "numtide",
+  "organization_id": "12345678",
+  "sender": "zimbatm",
+  "sender_id": "11111111",
+  "payload": { "...": "the raw GitHub webhook payload" },
+  "metadata": { "source": "events-api" }
 }
 ```
+
+`id` is the GitHub delivery id, or `gh-event-<id>` for public-ingest.
+The parsed fields are strings; decode `payload` for anything else.
+`metadata` is only present on public-ingest events.
+
+## Common Patterns
+
+Decode `payload` into a struct with the fields you need:
+
+```go
+// Build on push to main
+js.Subscribe("github.events.repo.*.push", func(msg *nats.Msg) {
+    var event events.GitHubEvent
+    json.Unmarshal(msg.Data, &event)
+    var push struct {
+        Ref string `json:"ref"`
+    }
+    json.Unmarshal(event.Payload, &push)
+    if push.Ref == "refs/heads/main" {
+        triggerBuild(event.RepositoryID)
+    }
+    msg.Ack()
+}, nats.Durable("ci"), nats.DeliverNew())
+
+// Alert on repositories made public
+js.Subscribe("github.events.repo.*.repository", func(msg *nats.Msg) {
+    var event events.GitHubEvent
+    json.Unmarshal(msg.Data, &event)
+    if event.Action == "publicized" {
+        sendAlert(event.Repository)
+    }
+    msg.Ack()
+}, nats.Durable("security"), nats.DeliverNew())
+
+// Auto-assign reviewers on new PRs
+js.Subscribe("github.events.pr.*.*.pull_request", func(msg *nats.Msg) {
+    var event events.GitHubEvent
+    json.Unmarshal(msg.Data, &event)
+    var pr struct {
+        PullRequest struct {
+            Number int `json:"number"`
+        } `json:"pull_request"`
+    }
+    json.Unmarshal(event.Payload, &pr)
+    if event.Action == "opened" {
+        assignReviewers(event.Repository, pr.PullRequest.Number)
+    }
+    msg.Ack()
+}, nats.Durable("reviewers"), nats.DeliverNew())
+```
+
+See [examples/](../examples/) for complete programs.
 
 ## Environment Variables
 
 ```bash
-# Minimal setup
-export S3_BUCKET="my-bucket"
-export WEBHOOK_SECRET="github-secret"
+# Required by the webhook receiver
+export WEBHOOK_SECRET="github-secret"      # or WEBHOOK_ALLOW_UNSIGNED=true
 
-# Override defaults  
+# Required by the s3 service
+export S3_BUCKET="my-bucket"
+export AWS_ACCESS_KEY_ID="your-key"         # unset: AWS credential chain
+export AWS_SECRET_ACCESS_KEY="your-secret"
+export S3_ENDPOINT="https://account.r2.cloudflarestorage.com"   # R2, rustfs
+
+# Overrides
 export NATS_URL="nats://nats.example.com:4222"
 export WEBHOOK_LISTEN_ADDR=":8080"
 export SSE_LISTEN_ADDR=":8081"
-
-# S3 compatible (e.g., Cloudflare R2)
-export S3_ENDPOINT="https://account.r2.cloudflarestorage.com"
-export AWS_ACCESS_KEY_ID="your-key"
-export AWS_SECRET_ACCESS_KEY="your-secret"
+export METRICS_LISTEN_ADDR=":9180"
+export LOG_FORMAT=json
 ```
+
+`.env.example` lists them all.
 
 ## Testing Your Setup
 
-### 1. Send Test Webhook
 ```bash
-# From GitHub webhook settings, send a ping event
-# Or use the test webhook script
-./scripts/test-webhook.sh
-```
+# Send a signed sample delivery
+WEBHOOK_SECRET=... ./scripts/test-webhook.sh
 
-### 2. Check NATS Stream
-```bash
-# View stream info
+# Look at the stream
 nats stream info GITHUB_EVENTS_RAW
+nats sub "github.events.org.*.pull_request"
 
-# Check for messages
-nats stream view GITHUB_EVENTS_RAW
-```
-
-### 3. Subscribe to Test
-```bash
-# Watch for ping events
-nats sub "github.events.org.*.ping"
+# Read it back over SSE
+curl -N 'http://localhost:8081/events?last=5'
 ```
 
 ## Debugging
 
-### Check Component Health
 ```bash
-curl http://localhost:8080/health  # Webhook receiver
-curl http://localhost:8081/health  # SSE server
-```
+# Health
+curl http://localhost:8080/health      # webhook receiver
+curl http://localhost:8081/health      # SSE server
+curl http://localhost:9180/healthz     # any process with METRICS_LISTEN_ADDR
 
-### View Logs
-```bash
-# If using hivemind/Procfile
-tail -f *.log
+# Metrics
+curl http://localhost:9180/metrics | grep octoflow_
 
-# Or check systemd/docker logs
+# Logs (hivemind prints them; NixOS keeps them in the journal)
 journalctl -u octoflow-webhook -f
-docker logs octoflow-webhook -f
-```
 
-### Monitor NATS
-```bash
-# Stream stats
+# NATS
 nats stream report
-
-# Consumer info
 nats consumer info GITHUB_EVENTS_RAW event-dispatcher
-
-# Check subscriptions
-nats server subscriptions
+nats consumer info GITHUB_EVENTS_RAW s3-worker
 ```

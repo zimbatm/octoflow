@@ -1,8 +1,12 @@
 openapi: 3.1.0
 info:
   title: Octoflow SSE API
-  version: 1.0.0
-  description: Server-Sent Events API for GitHub webhook event streaming
+  version: 0.1.0
+  description: |
+    Server-Sent Events for GitHub events stored in JetStream. Every route
+    streams `text/event-stream`. Each event is a named SSE event whose
+    `event` field is the GitHub event type, whose `id` is the JetStream
+    stream sequence, and whose `data` is a `GitHubEvent` JSON document.
 
 servers:
   - url: http://localhost:8081
@@ -11,177 +15,215 @@ servers:
 paths:
   /events:
     get:
-      summary: Stream all GitHub events
-      description: |
-        Establishes an SSE connection to stream all GitHub webhook events in real-time.
-        Supports resumption via Last-Event-ID header and historical event replay.
+      summary: Stream every event once
+      description: Reads the primary subjects, so fan-out copies are not repeated.
       operationId: streamAllEvents
       parameters:
-        - name: last
-          in: query
-          description: Number of historical events to replay (default 50)
-          schema:
-            type: integer
-            minimum: 1
-            default: 50
-            example: 100
-        - name: type
-          in: query
-          description: Comma-separated list of event types to filter
-          schema:
-            type: string
-            example: "push,pull_request"
-        - name: action
-          in: query
-          description: Comma-separated list of actions to filter
-          schema:
-            type: string
-            example: "opened,closed"
-        - name: Last-Event-ID
-          in: header
-          description: Resume from a specific event ID
-          schema:
-            type: string
-            example: "3fa3a85c-6a48-11f0-8793-19d640392600"
-      responses:
-        '200':
-          description: SSE stream established
-          headers:
-            Content-Type:
-              schema:
-                type: string
-                enum: ['text/event-stream']
-            Cache-Control:
-              schema:
-                type: string
-                enum: ['no-cache']
-            Connection:
-              schema:
-                type: string
-                enum: ['keep-alive']
-          content:
-            text/event-stream:
-              schema:
-                type: string
-                format: event-stream
-                description: |
-                  Stream of SSE events. Each event follows the SSE protocol:
-                  ```
-                  id: <event-id>
-                  event: <event-type>
-                  data: <json-payload>
-                  
-                  ```
-              examples:
-                connected:
-                  summary: Initial connection event
-                  value: |
-                    event: connected
-                    data: {"status":"connected","stream_id":"all","subject":"github.events.>"}
-                    
-                push:
-                  summary: GitHub push event
-                  value: |
-                    id: 3fa3a85c-6a48-11f0-8793-19d640392600
-                    event: push
-                    data: {"id":"3fa3a85c-6a48-11f0-8793-19d640392600","event":"push","delivery_id":"12345","organization":"octocat","repository":"octocat/Hello-World","payload":{...}}
-                    
-                heartbeat:
-                  summary: Keepalive heartbeat
-                  value: |
-                    : heartbeat
-                    
-  
-  /events/org/{org_id}:
-    get:
-      summary: Stream events for a specific organization
-      description: Stream all GitHub webhook events for a specific organization by ID
-      operationId: streamOrgEvents
-      parameters:
-        - name: org_id
-          in: path
-          required: true
-          description: Numeric organization ID
-          schema:
-            type: string
-            pattern: '^\d+$'
-            example: "1234567"
-        - $ref: '#/components/parameters/LastParam'
-        - $ref: '#/components/parameters/LastEventIdHeader'
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+
+  /events/org/{org_id}:
+    get:
+      summary: Events of one organization
+      operationId: streamOrgEvents
+      parameters:
+        - $ref: '#/components/parameters/OrgID'
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+        '404':
+          description: The id is not numeric
 
   /events/repo/{repo_id}:
     get:
-      summary: Stream events for a specific repository
-      description: Stream all GitHub webhook events for a specific repository by ID
+      summary: Events of one repository
       operationId: streamRepoEvents
       parameters:
-        - name: repo_id
-          in: path
-          required: true
-          description: Numeric repository ID
-          schema:
-            type: string
-            pattern: '^\d+$'
-            example: "1296269"
-        - $ref: '#/components/parameters/LastParam'
-        - $ref: '#/components/parameters/LastEventIdHeader'
+        - $ref: '#/components/parameters/RepoID'
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '404':
+          description: The id is not numeric
 
   /events/user/{user_id}:
     get:
-      summary: Stream events for a specific user
-      description: Stream all GitHub webhook events related to a specific user by ID
+      summary: Events involving one user, as sender, author, assignee or reviewer
       operationId: streamUserEvents
       parameters:
         - name: user_id
           in: path
           required: true
-          description: Numeric user ID
           schema:
             type: string
             pattern: '^\d+$'
-            example: "583231"
-        - $ref: '#/components/parameters/LastParam'
-        - $ref: '#/components/parameters/LastEventIdHeader'
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '404':
+          description: The id is not numeric
+
+  /events/pr/{repo_id}/{number}:
+    get:
+      summary: Events of one pull request
+      operationId: streamPREvents
+      parameters:
+        - $ref: '#/components/parameters/RepoID'
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+        '404':
+          description: An id is not numeric
+
+  /events/issue/{repo_id}/{number}:
+    get:
+      summary: Events of one issue
+      operationId: streamIssueEvents
+      parameters:
+        - $ref: '#/components/parameters/RepoID'
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+        '404':
+          description: An id is not numeric
+
+  /events/type/{event_type}:
+    get:
+      summary: One event type across every organization
+      operationId: streamTypeEvents
+      parameters:
+        - name: event_type
+          in: path
+          required: true
+          schema:
+            type: string
+            pattern: '^[a-z_]+$'
+            example: pull_request
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+        '404':
+          description: The type is not lower-case letters and underscores
 
   /stats:
     get:
-      summary: Get SSE connection statistics
-      description: Returns current statistics about active SSE connections
+      summary: Open SSE connections
       operationId: getStats
       responses:
         '200':
-          description: Connection statistics
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Stats'
 
+  /health:
+    get:
+      summary: Liveness
+      operationId: health
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+
 components:
   parameters:
-    LastParam:
-      name: last
-      in: query
-      description: Number of historical events to replay (default 50)
-      schema:
-        type: integer
-        minimum: 1
-        default: 50
-    
-    LastEventIdHeader:
-      name: Last-Event-ID
-      in: header
-      description: Resume from a specific event ID
+    OrgID:
+      name: org_id
+      in: path
+      required: true
+      description: Numeric organization id
       schema:
         type: string
+        pattern: '^\d+$'
+        example: "487568"
+    RepoID:
+      name: repo_id
+      in: path
+      required: true
+      description: Numeric repository id
+      schema:
+        type: string
+        pattern: '^\d+$'
+        example: "4542716"
+    Number:
+      name: number
+      in: path
+      required: true
+      description: Pull request or issue number
+      schema:
+        type: string
+        pattern: '^\d+$'
+    Last:
+      name: last
+      in: query
+      description: |
+        Replay the last N matching events before streaming new ones. 0 means
+        none, the default is 50, the maximum 1000. Ignored when
+        Last-Event-ID is sent.
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 1000
+        default: 50
+    Type:
+      name: type
+      in: query
+      description: Comma-separated GitHub event types to keep
+      schema:
+        type: string
+        example: "push,pull_request"
+    Action:
+      name: action
+      in: query
+      description: Comma-separated actions to keep
+      schema:
+        type: string
+        example: "opened,closed"
+    LastEventID:
+      name: Last-Event-ID
+      in: header
+      description: |
+        The `id` of the last event received, a JetStream stream sequence.
+        Browsers send it on reconnect; the stream resumes after it.
+      schema:
+        type: string
+        example: "1842"
 
   responses:
     SSEStream:
@@ -191,94 +233,92 @@ components:
           schema:
             type: string
             enum: ['text/event-stream']
+        Access-Control-Allow-Origin:
+          schema:
+            type: string
+            enum: ['*']
       content:
         text/event-stream:
           schema:
-            $ref: '#/components/schemas/SSEEvent'
+            type: string
+            description: |
+              The stream starts with `retry: 5000` and a `connected` event,
+              then one named event per GitHub event, and a `: heartbeat`
+              comment every 30 seconds while idle. An `error` event ends the
+              stream when the server could not read from JetStream.
+          examples:
+            connected:
+              value: |
+                retry: 5000
+
+                event: connected
+                data: {"status":"connected","stream_id":"org-487568","subjects":"github.events.org.487568.>"}
+
+            pull_request:
+              value: |
+                id: 1842
+                event: pull_request
+                data: {"id":"3fa3a85c-6a48-11f0-8793-19d640392600","event":"pull_request","action":"opened","received_at":"2026-10-14T12:00:00Z","repository":"NixOS/nixpkgs","repository_id":"4542716","organization":"NixOS","organization_id":"487568","sender":"zimbatm","sender_id":"2","payload":{}}
 
   schemas:
-    SSEEvent:
-      type: string
-      format: event-stream
-      description: |
-        Server-Sent Event format. Events are sent as:
-        - `id`: Unique event identifier (GitHub delivery ID)
-        - `event`: GitHub event type (push, pull_request, etc.)
-        - `data`: JSON payload of the GitHub webhook event
-        
-        Special events:
-        - `connected`: Sent when connection is established
-        - `error`: Sent when a stream error occurs
-        - Heartbeat comments (`: heartbeat`) sent every 30 seconds
-      example: |
-        id: 3fa3a85c-6a48-11f0-8793-19d640392600
-        event: push
-        data: {"id":"...","event":"push","delivery_id":"...","payload":{...}}
-
     GitHubEvent:
       type: object
-      required:
-        - id
-        - event
-        - delivery_id
+      description: The stored event, as published by the webhook receiver or public-ingest.
+      required: [id, event, received_at, payload]
       properties:
         id:
           type: string
-          format: uuid
-          description: Unique event ID
+          description: GitHub delivery id, or gh-event-<id> for public-ingest
         event:
           type: string
           description: GitHub event type
-          example: "push"
-        delivery_id:
+          example: pull_request
+        action:
           type: string
-          description: GitHub delivery ID
-        organization:
+        hook_id:
           type: string
-          description: Organization name
-        organization_id:
+        hook_installation:
           type: string
-          description: Organization numeric ID
+        received_at:
+          type: string
+          format: date-time
         repository:
           type: string
-          description: Repository full name
+          description: owner/name
         repository_id:
           type: string
-          description: Repository numeric ID
+        organization:
+          type: string
+        organization_id:
+          type: string
         sender:
           type: string
-          description: User login who triggered the event
         sender_id:
           type: string
-          description: User numeric ID
         payload:
           type: object
-          description: Raw GitHub webhook payload
+          description: The raw GitHub webhook payload
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Only on public-ingest events; source, github_event_id, created_at
 
     Stats:
       type: object
       properties:
         total_clients:
           type: integer
-          description: Total number of connected clients
         total_events:
           type: integer
-          description: Total events delivered across all clients
+          description: Events sent to the clients currently connected
         clients_by_stream:
           type: object
           additionalProperties:
             type: integer
-          description: Number of clients per stream type
       example:
-        total_clients: 5
+        total_clients: 3
         total_events: 1234
         clients_by_stream:
-          all: 2
-          org-1234567: 1
-          repo-1296269: 2
-
-tags:
-  - name: SSE
-    description: Server-Sent Events streaming endpoints
-  - name: Stats
-    description: Statistics and monitoring endpoints
+          all: 1
+          org-487568: 2

@@ -1,6 +1,8 @@
 # Octoflow Dashboard
 
-The Octoflow Dashboard provides a real-time visualization of GitHub events flowing through your system. It connects to the enhanced SSE server to display events with powerful filtering and subscription capabilities.
+The dashboard is a single static page, `web/index.html`, served by
+`octoflow dashboard`. It connects to the SSE server with the browser's
+EventSource and shows events as they arrive.
 
 ## Features
 
@@ -40,14 +42,21 @@ The dashboard supports subscribing to different event streams:
 
 ### Starting the Dashboard
 
-1. Ensure the SSE server is running on port 8081:
+1. Start the services:
    ```bash
    make run
    ```
 
-2. Access the dashboard at http://localhost:8082
+2. Open http://localhost:8082
 
-3. The dashboard will automatically connect to the firehose (all events) on load
+3. The page connects to the firehose (all events) on load
+
+### Finding the SSE server
+
+The page finds the SSE server from its own address: port 8081 on the same
+host when the page is served from port 8082, otherwise the page's own
+origin (the NixOS module serves both behind nginx). `?sse=https://host`
+overrides it.
 
 ### Automatic Name to ID Resolution
 
@@ -84,14 +93,12 @@ The dashboard consists of:
    - No build process required
    - Responsive design with CSS Grid
 
-2. **SSE Server (port 8081)**:
-   - Multiple endpoint support
-   - Per-stream subscriptions
-   - Real-time event streaming
+2. **SSE server (`octoflow sse`, port 8081)**:
+   - One route per subscription pattern, see `api/openapi-sse-example.yaml`
+   - Replays the last events, resumes with `Last-Event-ID`
 
-3. **Dashboard Server (port 8082)**:
-   - Simple static file server
-   - Serves the HTML/CSS/JS files
+3. **Dashboard server (`octoflow dashboard`, port 8082)**:
+   - Serves `web/`; `DASHBOARD_LISTEN_ADDR` and `WEB_DIR` change the defaults
 
 ## Event Types
 
@@ -122,9 +129,9 @@ The dashboard recognizes and color-codes these event types:
 
 ### Connection errors
 
-1. Check browser console for errors
-2. Verify SSE server is running on port 8081
-3. Check for CORS issues if accessing from different domain
+1. Check the browser console for the SSE URL it tried
+2. Verify the SSE server answers: `curl -N http://localhost:8081/events?last=1`
+3. If the SSE server is elsewhere, open the page with `?sse=<url>`
 
 ### Performance
 
