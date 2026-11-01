@@ -255,3 +255,60 @@ func TestRunGHArchiveStartsFromSavedProgress(t *testing.T) {
 }
 
 var _ = json.Marshal
+
+func TestPollRepoWaitsForTheRateLimitReset(t *testing.T) {
+	reset := time.Now().Add(90 * time.Second)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.Header().Set("X-RateLimit-Reset", fmt.Sprint(reset.Unix()))
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer srv.Close()
+
+	gh := ghevents.NewClient("")
+	gh.BaseURL = srv.URL
+	rec := &recorder{}
+	in := &Ingest{GH: gh, Publisher: rec, State: newState(t)}
+
+	wait, err := in.PollRepo(context.Background(), &ghevents.RepoInfo{ID: 5, FullName: "o/r"}, map[int64]string{})
+	if err != nil {
+		t.Fatalf("a rate limit is not an error: %v", err)
+	}
+	if wait < 90*time.Second || wait > 2*time.Minute {
+		t.Errorf("wait = %v, want about 100s until the reset", wait)
+	}
+	if len(rec.list()) != 0 {
+		t.Error("published under a rate limit")
+	}
+}
+
+func TestPollRepoSlowsDownWhenTheQuotaIsNearlyUsed(t *testing.T) {
+	reset := time.Now().Add(5 * time.Minute)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Poll-Interval", "60")
+		w.Header().Set("X-RateLimit-Remaining", "2")
+		w.Header().Set("X-RateLimit-Reset", fmt.Sprint(reset.Unix()))
+		if r.URL.Query().Get("page") != "1" {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		_, _ = w.Write([]byte("[" + apiEvent(101) + "]"))
+	}))
+	defer srv.Close()
+
+	gh := ghevents.NewClient("")
+	gh.BaseURL = srv.URL
+	rec := &recorder{}
+	in := &Ingest{GH: gh, Publisher: rec, State: newState(t)}
+
+	wait, err := in.PollRepo(context.Background(), &ghevents.RepoInfo{ID: 5, FullName: "o/r"}, map[int64]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.list()) != 1 {
+		t.Errorf("published %v, want the one event", rec.list())
+	}
+	if wait < 5*time.Minute {
+		t.Errorf("wait = %v, want until the reset, not the 60s poll interval", wait)
+	}
+}

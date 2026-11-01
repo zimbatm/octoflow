@@ -2,8 +2,10 @@ package ghevents
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -70,5 +72,63 @@ func TestRepoEvents(t *testing.T) {
 	}
 	if _, err := c.Repo(ctx, "other/repo"); err == nil {
 		t.Error("a 403 must be an error")
+	}
+}
+
+func TestRepoEventsRateLimit(t *testing.T) {
+	reset := time.Now().Add(2 * time.Minute).Truncate(time.Second)
+	var mode string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch mode {
+		case "quota-exhausted":
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset.Unix(), 10))
+			w.WriteHeader(http.StatusForbidden)
+		case "secondary":
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(http.StatusTooManyRequests)
+		case "forbidden":
+			w.Header().Set("X-RateLimit-Remaining", "41")
+			w.WriteHeader(http.StatusForbidden)
+		default:
+			w.Header().Set("X-RateLimit-Remaining", "41")
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset.Unix(), 10))
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	defer srv.Close()
+	c := NewClient("")
+	c.BaseURL = srv.URL
+	ctx := context.Background()
+
+	mode = "quota-exhausted"
+	_, err := c.RepoEvents(ctx, "o/r", 1, "")
+	var rl *RateLimitError
+	if !errors.As(err, &rl) || !rl.Reset.Equal(reset) {
+		t.Errorf("403 with quota 0: err = %v, want RateLimitError until %v", err, reset)
+	}
+	if _, err := c.Repo(ctx, "o/r"); !errors.As(err, &rl) {
+		t.Errorf("Repo under rate limit: err = %v", err)
+	}
+
+	mode = "secondary"
+	_, err = c.RepoEvents(ctx, "o/r", 1, "")
+	if !errors.As(err, &rl) || time.Until(rl.Reset) < 20*time.Second {
+		t.Errorf("429 with Retry-After: err = %v", err)
+	}
+
+	mode = "forbidden"
+	_, err = c.RepoEvents(ctx, "o/r", 1, "")
+	if err == nil || errors.As(err, &rl) {
+		t.Errorf("403 with quota left must be a plain error, got %v", err)
+	}
+
+	mode = "ok"
+	page, err := c.RepoEvents(ctx, "o/r", 1, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Quota.Remaining != 41 || !page.Quota.Reset.Equal(reset) {
+		t.Errorf("quota = %+v", page.Quota)
 	}
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/zimbatm/octoflow/internal/ghevents"
+	"github.com/zimbatm/octoflow/internal/metrics"
 	"github.com/zimbatm/octoflow/internal/retry"
 	"github.com/zimbatm/octoflow/pkg/events"
 )
@@ -64,11 +65,15 @@ func (in *Ingest) publish(ctx context.Context, e *ghevents.Event, owner ghevents
 		slog.Warn("Skipping unreadable event", "source", source, "github_event_id", e.ID, "error", err)
 		return nil
 	}
-	return retry.Do(ctx, func(ctx context.Context) error {
+	err = retry.Do(ctx, func(ctx context.Context) error {
 		pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		return in.Publisher.PublishEvent(pctx, ev)
 	}, retry.DefaultConfig())
+	if err == nil {
+		metrics.PublicIngestEvents.WithLabelValues(source).Inc()
+	}
+	return err
 }
 
 // RunEventsAPI polls each repository until ctx ends. GitHub's X-Poll-Interval
@@ -94,10 +99,16 @@ func (in *Ingest) RunEventsAPI(ctx context.Context, interval time.Duration) {
 	}
 }
 
+// pagesPerPoll is how many requests one poll may need; the quota must
+// cover them or the poll waits for the reset.
+const pagesPerPoll = 3
+
 // PollRepo publishes the events newer than the last one seen and returns
-// the poll interval GitHub asks for. The API keeps the newest 300 events
-// (3 pages); paging stops at events already seen. etags persists the
-// conditional-request state between polls; a 304 costs no rate limit.
+// how long to wait before the next poll: GitHub's poll interval, or the
+// time to the rate limit reset when the quota is used up. The API keeps
+// the newest 300 events (3 pages); paging stops at events already seen.
+// etags persists the conditional-request state between polls; a 304 costs
+// no rate limit.
 func (in *Ingest) PollRepo(ctx context.Context, repo *ghevents.RepoInfo, etags map[int64]string) (time.Duration, error) {
 	key := fmt.Sprintf("events-api.%d", repo.ID)
 	var lastID int64
@@ -106,21 +117,32 @@ func (in *Ingest) PollRepo(ctx context.Context, repo *ghevents.RepoInfo, etags m
 	}
 
 	first, err := in.GH.RepoEvents(ctx, repo.FullName, 1, etags[repo.ID])
+	if wait, limited := in.rateLimitWait(repo, err); limited {
+		return wait, nil
+	}
 	if err != nil {
+		metrics.PublicIngestPolls.WithLabelValues("error").Inc()
 		return 0, err
 	}
 	if first.NotModified {
-		return first.PollInterval, nil
+		metrics.PublicIngestPolls.WithLabelValues("not_modified").Inc()
+		return in.nextPoll(first, first.Quota), nil
 	}
 
 	all := first.Events
 	page := first.Events
-	for p := 2; p <= 3 && len(page) > 0 && minID(page) > lastID; p++ {
+	quota := first.Quota
+	for p := 2; p <= pagesPerPoll && len(page) > 0 && minID(page) > lastID; p++ {
 		next, err := in.GH.RepoEvents(ctx, repo.FullName, p, "")
+		if wait, limited := in.rateLimitWait(repo, err); limited {
+			return wait, nil
+		}
 		if err != nil {
+			metrics.PublicIngestPolls.WithLabelValues("error").Inc()
 			return first.PollInterval, err
 		}
 		page = next.Events
+		quota = next.Quota
 		all = append(all, page...)
 	}
 
@@ -146,8 +168,37 @@ func (in *Ingest) PollRepo(ctx context.Context, repo *ghevents.RepoInfo, etags m
 		return first.PollInterval, err
 	}
 	etags[repo.ID] = first.ETag
+	metrics.PublicIngestPolls.WithLabelValues("ok").Inc()
 	slog.Info("Events API poll", "repo", repo.FullName, "fetched", len(all), "published", published)
-	return first.PollInterval, nil
+	return in.nextPoll(first, quota), nil
+}
+
+// rateLimitWait turns a refused request into a wait until the reset.
+func (in *Ingest) rateLimitWait(repo *ghevents.RepoInfo, err error) (time.Duration, bool) {
+	var rl *ghevents.RateLimitError
+	if !errors.As(err, &rl) {
+		return 0, false
+	}
+	metrics.PublicIngestPolls.WithLabelValues("rate_limited").Inc()
+	wait := rl.Reset.Sub(in.now()) + 10*time.Second
+	slog.Warn("GitHub rate limit reached; waiting for the reset",
+		"repo", repo.FullName, "reset", rl.Reset.UTC().Format(time.RFC3339), "wait", wait)
+	return max(wait, 10*time.Second), true
+}
+
+// nextPoll is the poll interval GitHub asks for, stretched to the quota
+// reset when the next poll could not complete within the remaining quota.
+func (in *Ingest) nextPoll(page *ghevents.EventsPage, q ghevents.Quota) time.Duration {
+	wait := page.PollInterval
+	if q.Remaining >= 0 && q.Remaining < pagesPerPoll && q.Reset.After(in.now()) {
+		untilReset := q.Reset.Sub(in.now()) + 10*time.Second
+		if untilReset > wait {
+			slog.Info("Events API quota nearly used; slowing down",
+				"remaining", q.Remaining, "reset", q.Reset.UTC().Format(time.RFC3339))
+			wait = untilReset
+		}
+	}
+	return wait
 }
 
 func minID(evs []ghevents.Event) int64 {
