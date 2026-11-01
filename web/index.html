@@ -595,11 +595,9 @@
     </div>
     
     <script>
-        // The SSE server is a separate process. Pass ?sse=https://host to point
-        // the page elsewhere; by default it is port 8081 next to this page, or
-        // the page's own origin when something like nginx serves both.
-        const SSE_BASE = new URLSearchParams(location.search).get('sse')
-            || (location.port === '8082' ? `${location.protocol}//${location.hostname}:8081` : location.origin);
+        // The SSE routes share this page's origin unless the deployment splits
+        // them onto another host; then pass ?sse=https://host in the page URL.
+        const SSE_BASE = new URLSearchParams(location.search).get('sse') || location.origin;
         let eventSource = null;
         let stats = {
             total: 0,
@@ -608,6 +606,11 @@
         };
         let currentSubscription = 'all';
         let lookupCache = {};
+
+        // everything below comes from GitHub payloads and goes into innerHTML
+        function esc(s) {
+            return String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+        }
         
         // Initialize on page load
         document.addEventListener('DOMContentLoaded', function() {
@@ -899,17 +902,25 @@
                 handleEvent(JSON.parse(event.data));
             };
             
-            // Also listen for specific event types
+            // EventSource has no wildcard; every GitHub event type the server
+            // may name needs its own listener. Unknown ones fall to onmessage.
             const eventTypes = [
+                'branch_protection_configuration', 'branch_protection_rule', 'check_run', 'check_suite',
+                'code_scanning_alert', 'commit_comment', 'create', 'custom_property', 'custom_property_values',
+                'delete', 'dependabot_alert', 'deploy_key', 'deployment', 'deployment_protection_rule',
+                'deployment_review', 'deployment_status', 'discussion', 'discussion_comment', 'fork',
+                'github_app_authorization', 'gollum', 'installation', 'installation_repositories',
+                'installation_target', 'issue_comment', 'issues', 'label', 'marketplace_purchase', 'member',
+                'membership', 'merge_group', 'meta', 'milestone', 'org_block', 'organization', 'package',
+                'page_build', 'personal_access_token_request', 'ping', 'project', 'project_card',
+                'project_column', 'projects_v2', 'projects_v2_item', 'projects_v2_status_update', 'public',
                 'pull_request', 'pull_request_review', 'pull_request_review_comment',
-                'issues', 'issue_comment',
-                'push', 'create', 'delete',
-                'release', 'deployment', 'deployment_status',
-                'fork', 'star', 'watch',
-                'team_add', 'member', 'public',
-                'gollum', 'commit_comment',
-                'workflow_run', 'workflow_job',
-                'check_run', 'check_suite'
+                'pull_request_review_thread', 'push', 'registry_package', 'release', 'repository',
+                'repository_advisory', 'repository_dispatch', 'repository_import', 'repository_ruleset',
+                'repository_vulnerability_alert', 'secret_scanning_alert', 'secret_scanning_alert_location',
+                'secret_scanning_scan', 'security_advisory', 'security_and_analysis', 'sponsorship', 'star',
+                'status', 'sub_issues', 'team', 'team_add', 'watch', 'workflow_dispatch', 'workflow_job',
+                'workflow_run',
             ];
             
             eventTypes.forEach(eventType => {
@@ -979,19 +990,19 @@
             eventItem.innerHTML = `
                 <div class="event-header-row">
                     <div class="event-badges">
-                        <span class="event-type ${event.event}">${event.event.replace(/_/g, ' ')}</span>
-                        ${event.action ? `<span class="event-action">${event.action}</span>` : ''}
-                        ${prState ? `<span class="event-action">${prState}</span>` : ''}
-                        ${issueState ? `<span class="event-action">${issueState}</span>` : ''}
+                        <span class="event-type ${esc(event.event)}">${esc(event.event.replace(/_/g, ' '))}</span>
+                        ${event.action ? `<span class="event-action">${esc(event.action)}</span>` : ''}
+                        ${prState ? `<span class="event-action">${esc(prState)}</span>` : ''}
+                        ${issueState ? `<span class="event-action">${esc(issueState)}</span>` : ''}
                     </div>
                     <span class="event-time">${timestamp}</span>
                 </div>
                 <div class="event-details">
-                    ${event.repository ? `<a href="https://github.com/${event.repository}" target="_blank" class="event-repo">${event.repository}</a>` : ''}
-                    ${description ? `<div class="event-description">${description}</div>` : ''}
+                    ${event.repository ? `<a href="https://github.com/${esc(encodeURI(event.repository))}" target="_blank" rel="noopener" class="event-repo">${esc(event.repository)}</a>` : ''}
+                    ${description ? `<div class="event-description">${esc(description)}</div>` : ''}
                     <div class="event-user">
-                        ${event.sender ? `by <a href="https://github.com/${event.sender}" target="_blank">${event.sender}</a>` : ''}
-                        ${event.metadata ? ` • ${Object.entries(event.metadata).map(([k,v]) => `${k}: ${v}`).join(', ')}` : ''}
+                        ${event.sender ? `by <a href="https://github.com/${esc(encodeURI(event.sender))}" target="_blank" rel="noopener">${esc(event.sender)}</a>` : ''}
+                        ${event.metadata ? ` • ${Object.entries(event.metadata).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(', ')}` : ''}
                     </div>
                 </div>
             `;
@@ -1033,7 +1044,7 @@
                 .then(response => response.json())
                 .then(data => {
                     document.getElementById('connected-clients').textContent = 
-                        data.total_clients || '-';
+                        data.total_clients ?? '-';
                 })
                 .catch(error => {
                     console.error('Error fetching stats:', error);

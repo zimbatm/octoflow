@@ -71,7 +71,7 @@ func Dispatch(ctx context.Context, pub Publisher, prefix string, data []byte) (i
 		}
 	}
 
-	slog.Info("Dispatched event",
+	slog.Debug("Dispatched event",
 		"event_id", event.ID,
 		"event_type", event.Event,
 		"repo_id", entities.RepositoryID,
