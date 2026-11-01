@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -85,6 +86,7 @@ func LoadFromEnv() (*Config, error) {
 			Secret:         os.Getenv("WEBHOOK_SECRET"),
 			MaxPayloadSize: 25 << 20,
 			RequestTimeout: 10 * time.Second,
+			AllowedOrgs:    splitList(os.Getenv("WEBHOOK_ALLOWED_ORGS")),
 			HealthPath:     "/health",
 			MetricsPath:    "/metrics",
 		},
@@ -97,6 +99,10 @@ func LoadFromEnv() (*Config, error) {
 			MaxReconnects:     10,
 			ReconnectWait:     2 * time.Second,
 			ConnectionTimeout: 5 * time.Second,
+			Username:          os.Getenv("NATS_USERNAME"),
+			Password:          os.Getenv("NATS_PASSWORD"),
+			Token:             os.Getenv("NATS_TOKEN"),
+			NKey:              os.Getenv("NATS_NKEY_SEED"),
 		},
 		S3: S3Config{
 			Region:          getEnvOrDefault("AWS_REGION", "us-east-1"),
@@ -135,6 +141,16 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Validate reports missing settings. Only the s3-worker needs S3, so LoadFromEnv does not call it.
