@@ -175,7 +175,7 @@ func processAndDispatch(msg *nats.Msg, cfg *config.Config, publisher *natsIntern
 		// the stream deduplicates by message id across all subjects, so reusing
 		// event.ID here would drop every fan-out copy as a duplicate of the original.
 		msgID := event.ID + "@" + subject
-		if err := publisher.PublishToSubject(ctx, subject, msg.Data, msgID); err != nil {
+		if err := publisher.PublishToSubject(ctx, subject, event.Event, msg.Data, msgID); err != nil {
 			return fmt.Errorf("publish to %s: %w", subject, err)
 		}
 		slog.Debug("Dispatched event",

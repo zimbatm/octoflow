@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -133,18 +132,11 @@ func (p *Publisher) buildSubject(event *events.GitHubEvent) string {
 	return fmt.Sprintf("%s.global.%s", p.config.SubjectPrefix, event.Event)
 }
 
-// PublishToSubject publishes data to a specific subject
-func (p *Publisher) PublishToSubject(ctx context.Context, subject string, data []byte, msgID string) error {
+// PublishToSubject publishes data to a specific subject. eventType only labels the metrics.
+func (p *Publisher) PublishToSubject(ctx context.Context, subject, eventType string, data []byte, msgID string) error {
 	start := time.Now()
 	streamName := "events"
 	status := "success"
-	eventType := "unknown"
-
-	// Extract event type from subject
-	parts := strings.Split(subject, ".")
-	if len(parts) >= 4 {
-		eventType = parts[3]
-	}
 
 	defer func() {
 		// Record metrics
