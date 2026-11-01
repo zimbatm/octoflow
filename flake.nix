@@ -1,5 +1,5 @@
 {
-  description = "Simple flake with a devshell";
+  description = "octoflow: GitHub events into NATS JetStream, S3 and SSE";
 
   # Add all your dependencies here
   inputs = {
