@@ -51,19 +51,16 @@ nats stream ls
 #### Get detailed stream info
 ```bash
 nats stream info GITHUB_EVENTS_RAW
-nats stream info GITHUB_EVENTS_ORDERED
 ```
 
 #### Purge streams (remove all messages)
 ```bash
 nats stream purge GITHUB_EVENTS_RAW -f
-nats stream purge GITHUB_EVENTS_ORDERED -f
 ```
 
 #### Delete streams entirely
 ```bash
 nats stream rm GITHUB_EVENTS_RAW -f
-nats stream rm GITHUB_EVENTS_ORDERED -f
 ```
 
 #### Monitor stream activity
@@ -74,13 +71,11 @@ nats stream report
 #### List consumers
 ```bash
 nats consumer ls GITHUB_EVENTS_RAW
-nats consumer ls GITHUB_EVENTS_ORDERED
 ```
 
 #### Get consumer info
 ```bash
 nats consumer info GITHUB_EVENTS_RAW webhook-receiver
-nats consumer info GITHUB_EVENTS_ORDERED s3-worker
 ```
 
 #### Subscribe to events in real-time
