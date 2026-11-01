@@ -178,23 +178,6 @@ func createRouter(sseHandler *sse.Handler, cfg *config.Config) *mux.Router {
 		handleSSE(w, r, sseHandler, fmt.Sprintf("type-%s", eventType), subjects)
 	})
 
-	// API endpoints
-	router.HandleFunc("/api/events", func(w http.ResponseWriter, r *http.Request) {
-		setCORSHeaders(w)
-		if r.Method == "OPTIONS" {
-			return
-		}
-		handleEventHistory(w, r)
-	})
-
-	router.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
-		setCORSHeaders(w)
-		if r.Method == "OPTIONS" {
-			return
-		}
-		handleEventStats(w, r)
-	})
-
 	return router
 }
 
@@ -243,18 +226,4 @@ func createFilterFromQuery(r *http.Request) *events.EventFilter {
 	}
 
 	return filter
-}
-
-// handleEventHistory provides historical event data via REST API
-func handleEventHistory(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement event history retrieval from NATS
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"events":[],"message":"Event history API coming soon"}`)
-}
-
-// handleEventStats provides event statistics via REST API
-func handleEventStats(w http.ResponseWriter, r *http.Request) {
-	// TODO: Implement event statistics
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintf(w, `{"total_events":0,"message":"Event statistics API coming soon"}`)
 }
