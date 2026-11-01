@@ -48,8 +48,9 @@ by hand. The message is terminated and no harm is done.
 
 - The s3 service only runs with `S3_BUCKET`; in `octoflow all` it is
   skipped silently without it.
-- Uploads happen every 1000 events, every five minutes, and on stop.
-  With few events, wait for the five minutes or stop the service.
+- Uploads happen every 1000 events, one hour after the first event of a
+  batch (`S3_BATCH_TIMEOUT`), and on stop.
+  With few events, wait for the hour, lower the timeout, or stop the service.
 - `Failed to write batch to S3` in the log names the cause: credentials,
   a missing bucket, a wrong endpoint. The batch is not lost: its
   messages are redelivered from NATS after `AckWait` (batch timeout plus

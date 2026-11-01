@@ -88,7 +88,6 @@ func testWriter(up Uploader, batchSize int) (*S3Writer, *time.Time) {
 	w := NewWriter(cfg, up)
 	now := time.Date(2026, 10, 14, 9, 30, 0, 0, time.UTC)
 	w.now = func() time.Time { return now }
-	w.lastFlush = now
 	return w, &now
 }
 
@@ -232,5 +231,28 @@ func TestDayPrefix(t *testing.T) {
 	got := DayPrefix("github-events", time.Date(2026, 1, 5, 23, 59, 0, 0, time.FixedZone("x", 3600)))
 	if got != "github-events/2026/01/05/" {
 		t.Errorf("DayPrefix = %q", got)
+	}
+}
+
+func TestBatchTimeoutCountsFromTheFirstEvent(t *testing.T) {
+	up := &fakeUploader{}
+	w, now := testWriter(up, 100)
+	*now = now.Add(3 * time.Hour)
+	w.AddEvent(event("a"), func(error) {})
+	w.FlushIfDue()
+	if len(up.keys) != 0 {
+		t.Fatal("a quiet period before the first event must not close the batch at once")
+	}
+	*now = now.Add(59 * time.Second)
+	w.AddEvent(event("b"), func(error) {})
+	w.FlushIfDue()
+	if len(up.keys) != 0 {
+		t.Fatal("flushed before the timeout since the first event")
+	}
+	*now = now.Add(time.Second)
+	w.FlushIfDue()
+	evs, _ := DecodeParquet(up.keys[0])
+	if len(up.keys) != 1 || len(evs) != 2 {
+		t.Fatalf("uploads = %d, events in the first = %d; want one file with both events", len(up.keys), len(evs))
 	}
 }

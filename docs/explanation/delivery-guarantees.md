@@ -42,7 +42,8 @@ and are uploaded in a later batch. A failed upload is logged, the batch
 is dropped and the same redelivery mechanism repeats it. Two files can
 therefore hold the same event after a failure; `id` identifies it.
 
-Batches close on 1000 events, 100 MB of payload, five minutes, or
+Batches close on 1000 events, 100 MB of payload, one hour after their
+first event (`S3_BATCH_TIMEOUT`), or
 shutdown. A clean shutdown flushes before the NATS connection closes,
 so the acknowledgements still go out.
 

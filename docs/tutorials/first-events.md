@@ -126,7 +126,7 @@ stream in the dashboard.
 ## 6. See the archive being written
 
 The s3 service batches events and uploads a Parquet file every 1000
-events or five minutes, and when it stops. Stop hivemind with Ctrl-C in
+events or one hour (`S3_BATCH_TIMEOUT`), and when it stops. Stop hivemind with Ctrl-C in
 the first terminal and look for:
 
 ```

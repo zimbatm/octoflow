@@ -57,8 +57,12 @@ connection timeout.
 | `S3_ENDPOINT` | AWS for the region | `http://` or `https://` URL of an S3-compatible store. |
 | `S3_KEY_PREFIX` | `github-events` | First path element of every object key. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | none | Static credentials. When the key id is unset, the AWS chain is tried: environment, shared credentials file, instance role. |
+| `S3_BATCH_TIMEOUT` | `1h` | A batch closes this long after its first event. It is the archive lag, and the time events wait unacked in the stream; `AckWait` of the consumer is this plus two minutes. |
+| `S3_BATCH_SIZE` | `1000` | Events per batch; a full batch closes at once. |
+| `S3_BATCH_MAX_BYTES` | `100MiB` | Payload bytes per batch; same suffixes as `NATS_STREAM_MAX_BYTES`. Bounds the memory of the service. |
 
-Fixed: batches of 1000 events, 100 MB of payload or 5 minutes, Snappy
+A quiet repository gets one file per hour at most; a busy one a file per
+1000 events. Fixed: Snappy
 compression, row groups of 10000.
 
 ## SSE server

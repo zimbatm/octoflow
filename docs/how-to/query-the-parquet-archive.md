@@ -48,7 +48,7 @@ SELECT * FROM read_parquet('.data/s3/octoflow/github-events/*/*/*/*.parquet');
 
 Athena, Spark, Polars and pandas read the same layout; partition by the
 path's year, month and day. Each file holds at most 1000 events (the
-batch size) and at most five minutes of them, so a busy day has many
+batch size) and at most `S3_BATCH_TIMEOUT` (one hour) of them, so a busy day has many
 small files. Compact them if a query engine struggles; Octoflow does not
 rewrite files it has uploaded.
 

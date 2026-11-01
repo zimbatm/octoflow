@@ -83,7 +83,8 @@ type S3Writer struct {
 	batch     []*events.GitHubEvent
 	done      []Done
 	batchSize int64
-	lastFlush time.Time
+	// when the first event of the open batch arrived
+	batchStart time.Time
 }
 
 // NewS3Writer uploads to the bucket in cfg; see newClient for credentials.
@@ -98,20 +99,18 @@ func NewS3Writer(cfg *config.S3Config) (*S3Writer, error) {
 // NewWriter batches events for up.
 func NewWriter(cfg *config.S3Config, up Uploader) *S3Writer {
 	return &S3Writer{
-		config:    cfg,
-		uploader:  up,
-		now:       time.Now,
-		batch:     make([]*events.GitHubEvent, 0, cfg.BatchSize),
-		lastFlush: time.Now(),
+		config:   cfg,
+		uploader: up,
+		now:      time.Now,
+		batch:    make([]*events.GitHubEvent, 0, cfg.BatchSize),
 	}
 }
 
-// SetClock replaces time.Now for tests; it also resets the batch timer.
+// SetClock replaces time.Now for tests.
 func (w *S3Writer) SetClock(now func() time.Time) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.now = now
-	w.lastFlush = now()
 }
 
 type minioUploader struct {
@@ -130,6 +129,9 @@ func (w *S3Writer) AddEvent(event *events.GitHubEvent, done Done) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if len(w.batch) == 0 {
+		w.batchStart = w.now()
+	}
 	w.batch = append(w.batch, event)
 	w.done = append(w.done, done)
 	w.batchSize += int64(len(event.Payload))
@@ -142,14 +144,14 @@ func (w *S3Writer) AddEvent(event *events.GitHubEvent, done Done) {
 func (w *S3Writer) shouldFlush() bool {
 	return len(w.batch) >= w.config.BatchSize ||
 		w.batchSize >= w.config.BatchMaxBytes ||
-		w.now().Sub(w.lastFlush) >= w.config.BatchTimeout
+		w.now().Sub(w.batchStart) >= w.config.BatchTimeout
 }
 
 // FlushIfDue flushes when the batch timeout has passed.
 func (w *S3Writer) FlushIfDue() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if len(w.batch) > 0 && w.now().Sub(w.lastFlush) >= w.config.BatchTimeout {
+	if len(w.batch) > 0 && w.now().Sub(w.batchStart) >= w.config.BatchTimeout {
 		w.flushLocked()
 	}
 }
@@ -190,7 +192,6 @@ func (w *S3Writer) flushLocked() {
 	w.batch = w.batch[:0]
 	w.done = w.done[:0]
 	w.batchSize = 0
-	w.lastFlush = w.now()
 }
 
 func (w *S3Writer) upload() error {

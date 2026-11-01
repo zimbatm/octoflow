@@ -94,6 +94,7 @@ WEBHOOK_SECRET=...            # required; WEBHOOK_ALLOW_UNSIGNED=true to run wit
 WEBHOOK_ALLOWED_ORGS=a,b      # optional allow-list
 S3_BUCKET=...                 # s3 only
 S3_ENDPOINT=http://...        # R2, rustfs; unset for AWS
+S3_BATCH_TIMEOUT=1h           # archive lag; S3_BATCH_SIZE=1000, S3_BATCH_MAX_BYTES=100MiB
 AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   # unset keys: AWS credential chain
 NATS_URL=nats://localhost:4222
 NATS_USERNAME / NATS_PASSWORD / NATS_TOKEN / NATS_NKEY_SEED

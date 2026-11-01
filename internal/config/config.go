@@ -72,6 +72,8 @@ type S3Config struct {
 	Bucket    string
 	KeyPrefix string
 
+	// a batch closes on BatchSize events, BatchMaxBytes of payload or
+	// BatchTimeout after its first event, whichever comes first
 	BatchSize     int
 	BatchTimeout  time.Duration
 	BatchMaxBytes int64
@@ -142,6 +144,18 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	batchSize, err := envParse("S3_BATCH_SIZE", 1000, strconv.Atoi)
+	if err != nil {
+		return nil, err
+	}
+	batchTimeout, err := envParse("S3_BATCH_TIMEOUT", time.Hour, time.ParseDuration)
+	if err != nil {
+		return nil, err
+	}
+	batchMaxBytes, err := envParse("S3_BATCH_MAX_BYTES", int64(100<<20), parseBytes)
+	if err != nil {
+		return nil, err
+	}
 	maxClients, err := envParse("SSE_MAX_CLIENTS", 1000, strconv.Atoi)
 	if err != nil {
 		return nil, err
@@ -181,9 +195,9 @@ func LoadFromEnv() (*Config, error) {
 			Region:          getEnvOrDefault("AWS_REGION", "us-east-1"),
 			Bucket:          os.Getenv("S3_BUCKET"),
 			KeyPrefix:       getEnvOrDefault("S3_KEY_PREFIX", "github-events"),
-			BatchSize:       1000,
-			BatchTimeout:    5 * time.Minute,
-			BatchMaxBytes:   100 << 20,
+			BatchSize:       batchSize,
+			BatchTimeout:    batchTimeout,
+			BatchMaxBytes:   batchMaxBytes,
 			CompressionType: "snappy",
 			RowGroupSize:    10000,
 			AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
