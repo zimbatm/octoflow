@@ -109,16 +109,6 @@ func (p *Publisher) PublishEvent(ctx context.Context, event *events.GitHubEvent)
 	return nil
 }
 
-// PublishBatch publishes multiple events to NATS
-func (p *Publisher) PublishBatch(ctx context.Context, events []*events.GitHubEvent) error {
-	for _, event := range events {
-		if err := p.PublishEvent(ctx, event); err != nil {
-			return fmt.Errorf("failed to publish event %s: %w", event.ID, err)
-		}
-	}
-	return nil
-}
-
 // buildSubject constructs the NATS subject for an event
 func (p *Publisher) buildSubject(event *events.GitHubEvent) string {
 	// Use simplified pattern: org.{org_id}.{event_type}
@@ -185,22 +175,8 @@ func (p *Publisher) PublishToSubject(ctx context.Context, subject, eventType str
 }
 
 // Close closes the NATS connection
-func (p *Publisher) Close() error {
+func (p *Publisher) Close() {
 	if p.nc != nil {
 		p.nc.Close()
 	}
-	return nil
-}
-
-// IsConnected returns true if connected to NATS
-func (p *Publisher) IsConnected() bool {
-	return p.nc != nil && p.nc.IsConnected()
-}
-
-// Stats returns NATS connection statistics
-func (p *Publisher) Stats() nats.Statistics {
-	if p.nc != nil {
-		return p.nc.Stats()
-	}
-	return nats.Statistics{}
 }

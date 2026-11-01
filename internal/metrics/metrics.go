@@ -36,11 +36,6 @@ var (
 		Buckets: prometheus.DefBuckets,
 	}, []string{"stream"})
 
-	NATSRetries = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "octoflow_nats_publish_retries_total",
-		Help: "Total number of NATS publish retries",
-	}, []string{"stream", "event_type"})
-
 	// S3 metrics
 	S3BatchesWritten = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "octoflow_s3_batches_written_total",
@@ -64,34 +59,6 @@ var (
 		Help:    "Duration of S3 write operations",
 		Buckets: prometheus.DefBuckets,
 	})
-
-	// SSE metrics
-	SSEConnectedClients = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "octoflow_sse_connected_clients",
-		Help: "Number of currently connected SSE clients",
-	})
-
-	SSEEventsStreamed = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "octoflow_sse_events_streamed_total",
-		Help: "Total number of events streamed via SSE",
-	}, []string{"event_type"})
-
-	// Reorder metrics
-	ReorderBufferSize = promauto.NewGauge(prometheus.GaugeOpts{
-		Name: "octoflow_reorder_buffer_size",
-		Help: "Current size of the event reorder buffer",
-	})
-
-	ReorderEventAge = promauto.NewHistogram(prometheus.HistogramOpts{
-		Name:    "octoflow_reorder_event_age_seconds",
-		Help:    "Age of events when flushed from reorder buffer",
-		Buckets: prometheus.ExponentialBuckets(0.1, 2, 10), // 0.1s to 100s
-	})
-
-	ReorderEventsProcessed = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "octoflow_reorder_events_processed_total",
-		Help: "Total number of events processed by reorder worker",
-	}, []string{"status"})
 
 	// General metrics
 	EventProcessingErrors = promauto.NewCounterVec(prometheus.CounterOpts{

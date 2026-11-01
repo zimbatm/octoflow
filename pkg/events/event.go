@@ -94,13 +94,6 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-// EventBatch represents a batch of events for processing
-type EventBatch struct {
-	Events    []*GitHubEvent `json:"events"`
-	BatchID   string         `json:"batch_id"`
-	CreatedAt time.Time      `json:"created_at"`
-}
-
 // EventEntities represents all entities involved in a GitHub event
 // Used by the event dispatcher to route events to entity-specific subjects
 type EventEntities struct {
