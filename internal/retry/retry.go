@@ -6,17 +6,17 @@ import (
 	"time"
 )
 
-// RetryConfig holds retry configuration
-type RetryConfig struct {
+// Config bounds the attempts. The delay grows by Multiplier from
+// InitialDelay up to MaxDelay.
+type Config struct {
 	MaxAttempts  int
 	InitialDelay time.Duration
 	MaxDelay     time.Duration
 	Multiplier   float64
 }
 
-// DefaultConfig returns default retry configuration
-func DefaultConfig() RetryConfig {
-	return RetryConfig{
+func DefaultConfig() Config {
+	return Config{
 		MaxAttempts:  3,
 		InitialDelay: 100 * time.Millisecond,
 		MaxDelay:     5 * time.Second,
@@ -24,62 +24,33 @@ func DefaultConfig() RetryConfig {
 	}
 }
 
-// Operation is a function that can be retried
 type Operation func(ctx context.Context) error
 
-// Do executes an operation with exponential backoff retry
-func Do(ctx context.Context, op Operation, config RetryConfig) error {
-	var lastErr error
-	delay := config.InitialDelay
-
-	for attempt := 1; attempt <= config.MaxAttempts; attempt++ {
-		// Check if context is cancelled
+// Do runs op until it succeeds, the attempts run out, or ctx ends. It
+// returns the last error and leaves reporting it to the caller.
+func Do(ctx context.Context, op Operation, cfg Config) error {
+	delay := cfg.InitialDelay
+	for attempt := 1; ; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		err := op(ctx)
+		if err == nil {
+			return nil
+		}
+		if attempt >= cfg.MaxAttempts {
+			return err
+		}
+		slog.Warn("Operation failed, will retry",
+			"attempt", attempt,
+			"max_attempts", cfg.MaxAttempts,
+			"next_delay", delay,
+			"error", err)
 		select {
+		case <-time.After(delay):
 		case <-ctx.Done():
 			return ctx.Err()
-		default:
 		}
-
-		// Try the operation
-		if err := op(ctx); err == nil {
-			// Success
-			if attempt > 1 {
-				slog.Debug("Operation succeeded after retry",
-					"attempt", attempt,
-					"total_attempts", config.MaxAttempts)
-			}
-			return nil
-		} else {
-			lastErr = err
-
-			// Log retry attempt
-			if attempt < config.MaxAttempts {
-				slog.Warn("Operation failed, will retry",
-					"attempt", attempt,
-					"max_attempts", config.MaxAttempts,
-					"next_delay", delay,
-					"error", err)
-
-				// Wait before next attempt
-				select {
-				case <-time.After(delay):
-					// Continue to next attempt
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-
-				// Calculate next delay with exponential backoff
-				delay = time.Duration(float64(delay) * config.Multiplier)
-				if delay > config.MaxDelay {
-					delay = config.MaxDelay
-				}
-			} else {
-				slog.Error("Operation failed after all retries",
-					"attempts", attempt,
-					"error", err)
-			}
-		}
+		delay = min(time.Duration(float64(delay)*cfg.Multiplier), cfg.MaxDelay)
 	}
-
-	return lastErr
 }
