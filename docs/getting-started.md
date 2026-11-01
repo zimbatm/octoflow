@@ -6,7 +6,7 @@ This guide walks you through setting up Octoflow to capture and process GitHub e
 
 Before starting, ensure you have:
 
-- Go 1.21+ installed
+- Go 1.26 (`nix develop` provides it)
 - Access to a NATS server (or Docker to run one)
 - An S3 bucket (AWS S3, Cloudflare R2, rustfs, etc.)
 - Admin access to your GitHub organization
@@ -105,7 +105,7 @@ curl -H "Authorization: token YOUR_GITHUB_TOKEN" \
 
 ### Option A: All-in-One (Development)
 ```bash
-make run-local
+make run
 ```
 
 This starts all components using Hivemind.

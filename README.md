@@ -124,9 +124,9 @@ Progress is kept in the NATS KV bucket `octoflow_public_ingest`.
 
 ### Prerequisites
 
-- Go 1.21+
+- Go 1.26 (`nix develop` provides it, with NATS and rustfs)
 - NATS Server with JetStream
-- S3 bucket (AWS or compatible)
+- S3 bucket (AWS or compatible) for the s3-worker
 - GitHub organization webhook access
 
 ### Installation
@@ -144,17 +144,23 @@ make build
 ### Configuration
 
 ```bash
-# Required
-export S3_BUCKET="your-bucket-name"
-
-# Recommended for production
+# Required by the webhook receiver. Without it the receiver refuses to
+# start, unless WEBHOOK_ALLOW_UNSIGNED=true says unsigned deliveries are wanted.
 export WEBHOOK_SECRET="your-github-secret"
+
+# Required by the s3-worker only
+export S3_BUCKET="your-bucket-name"
 
 # Optional overrides
 export WEBHOOK_LISTEN_ADDR=":8080"
+export WEBHOOK_ALLOWED_ORGS="numtide"     # comma-separated; empty accepts all
 export SSE_LISTEN_ADDR=":8081"
+export DASHBOARD_LISTEN_ADDR=":8082"
 export NATS_URL="nats://localhost:4222"
+export NATS_USERNAME= NATS_PASSWORD=      # or NATS_TOKEN, or NATS_NKEY_SEED
 ```
+
+See `.env.example` for the full list.
 
 ### GitHub Webhook Setup
 
@@ -171,7 +177,7 @@ export NATS_URL="nats://localhost:4222"
 # Quick start - runs all services
 cp .env.example .env
 # Edit .env with your values
-make run-local
+make run
 
 # Or start services individually:
 nats-server -js                    # NATS with JetStream
@@ -200,33 +206,35 @@ nats sub "github.events.user.11111111.*"
 # Watch PR #456 in repo 87654321
 nats sub "github.events.pr.87654321.456"
 
-# All PRs in a repository
-nats sub "github.events.pr.87654321.>"
+# All PRs in a repository, one copy per event
+nats sub "github.events.pr.87654321.*"
 ```
 
 ### Go Application
 
 ```go
+import "github.com/zimbatm/octoflow/pkg/events"
+
 nc, _ := nats.Connect("nats://localhost:4222")
 js, _ := nc.JetStream()
 
-// Subscribe to all events for your org
-sub, _ := js.Subscribe("github.events.org.12345678.>", func(msg *nats.Msg) {
+// Every event of organization 12345678, once, as stored
+_, _ = js.Subscribe("github.events.org.12345678.>", func(msg *nats.Msg) {
     var event events.GitHubEvent
-    json.Unmarshal(msg.Data, &event)
-    // Process event...
-})
-
-// Track specific user activity
-sub, _ := js.Subscribe("github.events.user.11111111.*", func(msg *nats.Msg) {
-    // User performed an action
-})
-
-// Monitor a pull request
-sub, _ := js.Subscribe("github.events.pr.87654321.456", func(msg *nats.Msg) {
-    // PR was updated
-})
+    if err := json.Unmarshal(msg.Data, &event); err != nil {
+        _ = msg.Term() // not retryable
+        return
+    }
+    // event.Event, event.Action, event.Repository, event.Sender and the
+    // numeric ids are parsed; event.Payload is the raw GitHub payload.
+    fmt.Println(event.Event, event.Action, event.Repository, event.Sender)
+    _ = msg.Ack()
+}, nats.Durable("my-app"), nats.DeliverNew())
 ```
+
+Other subjects: `github.events.user.11111111.*` for everything a user is
+involved in, `github.events.pr.87654321.456` for one pull request. See
+[examples/](examples/) for two complete programs and the subject table.
 
 ### JavaScript (SSE)
 
@@ -257,10 +265,15 @@ Trigger builds when specific branches are pushed:
 js.Subscribe("github.events.repo.*.push", func(msg *nats.Msg) {
     var event events.GitHubEvent
     json.Unmarshal(msg.Data, &event)
-    
-    if event.Ref == "refs/heads/main" {
-        triggerBuild(event.Repository.ID)
+
+    var push struct {
+        Ref string `json:"ref"`
     }
+    json.Unmarshal(event.Payload, &push)
+    if push.Ref == "refs/heads/main" {
+        triggerBuild(event.RepositoryID)
+    }
+    msg.Ack()
 })
 ```
 
@@ -272,10 +285,11 @@ Alert on repository visibility changes:
 js.Subscribe("github.events.repo.*.repository", func(msg *nats.Msg) {
     var event events.GitHubEvent
     json.Unmarshal(msg.Data, &event)
-    
+
     if event.Action == "publicized" {
         sendAlert("Repository made public", event.Repository)
     }
+    msg.Ack()
 })
 ```
 
@@ -287,8 +301,18 @@ Track PR review times:
 js.Subscribe("github.events.pr.*.*.pull_request_review", func(msg *nats.Msg) {
     var event events.GitHubEvent
     json.Unmarshal(msg.Data, &event)
-    
-    recordReviewTime(event.PullRequest.ID, event.Review.SubmittedAt)
+
+    var review struct {
+        PullRequest struct {
+            Number int `json:"number"`
+        } `json:"pull_request"`
+        Review struct {
+            SubmittedAt time.Time `json:"submitted_at"`
+        } `json:"review"`
+    }
+    json.Unmarshal(event.Payload, &review)
+    recordReviewTime(event.Repository, review.PullRequest.Number, review.Review.SubmittedAt)
+    msg.Ack()
 })
 ```
 
@@ -335,7 +359,8 @@ S3 worker stores every event.
 
 ### Security
 
-- Always set `WEBHOOK_SECRET` for signature validation
+- `WEBHOOK_SECRET` is required; the receiver refuses to start without it
+  unless `WEBHOOK_ALLOW_UNSIGNED=true` says unsigned deliveries are wanted
 - Use TLS for webhook endpoints
 - Enable NATS authentication
 - Configure S3 encryption
@@ -393,9 +418,11 @@ The flake exports `nixosModules.default`. It runs NATS with JetStream on
 ## Development
 
 ```bash
-make test           # Run tests
-make build          # Build all binaries
-make run-local      # Start everything locally
+make test           # Run tests (some start an embedded NATS server)
+make lint           # golangci-lint
+make build          # Build all binaries into ./bin
+make run            # Start everything locally with hivemind
+nix flake check     # Package, tests and the NixOS VM test
 ```
 
 ## Documentation
@@ -409,18 +436,20 @@ make run-local      # Start everything locally
 ## Example Applications
 
 See the [examples/](examples/) directory for complete working examples:
-- **[PR Monitor](examples/pr-monitor.go)** - Track pull request lifecycle
-- **[Security Monitor](examples/security-monitor.go)** - Alert on security events
-- **[Examples README](examples/README.md)** - Building your own consumers
+- **[pr-monitor](examples/pr-monitor/main.go)** - Print the pull request activity of a repository
+- **[security-monitor](examples/security-monitor/main.go)** - Print the events that change access
+- **[Examples README](examples/README.md)** - Building your own consumers and the subject table
 
 ## Architecture Deep Dive
 
 ### NATS JetStream Configuration
 
 - **Stream**: `GITHUB_EVENTS_RAW`
-- **Subjects**: `github.events.>` (flexible depth)
-- **Deduplication**: 24-hour window on GitHub delivery ID
-- **Retention**: Configurable (default 24 hours)
+- **Subjects**: `github.events.>`; primary events and fan-out copies share it
+- **Deduplication**: 24-hour window on the message id (delivery id, or
+  `<delivery id>@<subject>` for a fan-out copy)
+- **Retention**: 7 days by default; each event is stored once per subject it
+  is routed to (repo, every involved user, PR and issue, twice each)
 - **Delivery**: At-least-once guarantee
 
 ### Component Responsibilities

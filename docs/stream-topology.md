@@ -76,7 +76,7 @@ The dispatcher extracts entities and publishes to multiple subjects:
 |---------|---------|-------------|
 | `github.events.pr.{repo_id}.{pr_number}.{event_type}` | `github.events.pr.87654321.456.pull_request_review` | Specific PR event |
 | `github.events.pr.{repo_id}.{pr_number}` | `github.events.pr.87654321.456` | All events for PR |
-| `github.events.pr.{repo_id}.>` | `github.events.pr.87654321.>` | All PRs in repository |
+| `github.events.pr.{repo_id}.*` | `github.events.pr.87654321.*` | All PRs in repository, one copy per event |
 
 #### Issue Events
 | Pattern | Example | Description |
@@ -122,7 +122,7 @@ nats sub "github.events.user.11111111.pull_request"
 nats sub "github.events.pr.87654321.456"
 
 # All PRs in repo
-nats sub "github.events.pr.87654321.>"
+nats sub "github.events.pr.87654321.*"
 
 # Issue #123 updates
 nats sub "github.events.issue.87654321.123"
@@ -150,7 +150,7 @@ nats sub "github.events.repo.87654321.push" \
          "github.events.repo.87654321.release"
 
 # All PR events across multiple repos
-nats sub "github.events.pr.87654321.>" \
+nats sub "github.events.pr.87654321.*" \
          "github.events.pr.87654322.>" \
          "github.events.pr.87654323.>"
 ```
