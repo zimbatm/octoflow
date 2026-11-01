@@ -65,10 +65,17 @@ func toRow(e *events.GitHubEvent) parquetRow {
 // dropped (the upload error). The caller acks or naks the source message there.
 type Done func(error)
 
-// S3Writer writes events to S3 in Parquet format. It is safe for concurrent use.
+// Uploader stores one object under key.
+type Uploader interface {
+	Upload(ctx context.Context, key string, data []byte) error
+}
+
+// S3Writer batches events into Parquet files and hands each file to an
+// Uploader. It is safe for concurrent use.
 type S3Writer struct {
-	config      *config.S3Config
-	minioClient *minio.Client
+	config   *config.S3Config
+	uploader Uploader
+	now      func() time.Time
 
 	mu        sync.Mutex
 	batch     []*events.GitHubEvent
@@ -77,31 +84,59 @@ type S3Writer struct {
 	lastFlush time.Time
 }
 
-// NewS3Writer creates a new S3 writer
+// NewS3Writer uploads to the bucket in cfg. Static credentials are used when
+// AccessKeyID is set; otherwise the environment, the shared credentials
+// file and the instance role are tried in that order.
 func NewS3Writer(cfg *config.S3Config) (*S3Writer, error) {
 	endpoint := cfg.Endpoint
 	if endpoint == "" {
 		endpoint = fmt.Sprintf("s3.%s.amazonaws.com", cfg.Region)
 	}
-
 	useSSL := !strings.HasPrefix(endpoint, "http://")
 	endpoint = strings.TrimPrefix(strings.TrimPrefix(endpoint, "http://"), "https://")
 
-	minioClient, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, cfg.SessionToken),
+	var creds *credentials.Credentials
+	if cfg.AccessKeyID != "" {
+		creds = credentials.NewStaticV4(cfg.AccessKeyID, cfg.SecretAccessKey, cfg.SessionToken)
+	} else {
+		creds = credentials.NewChainCredentials([]credentials.Provider{
+			&credentials.EnvAWS{},
+			&credentials.FileAWSCredentials{},
+			&credentials.IAM{},
+		})
+	}
+
+	client, err := minio.New(endpoint, &minio.Options{
+		Creds:  creds,
 		Secure: useSSL,
 		Region: cfg.Region,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create MinIO client: %w", err)
+		return nil, fmt.Errorf("failed to create S3 client: %w", err)
 	}
+	return NewWriter(cfg, &minioUploader{client: client, bucket: cfg.Bucket}), nil
+}
 
+// NewWriter batches events for up.
+func NewWriter(cfg *config.S3Config, up Uploader) *S3Writer {
 	return &S3Writer{
-		config:      cfg,
-		minioClient: minioClient,
-		batch:       make([]*events.GitHubEvent, 0, cfg.BatchSize),
-		lastFlush:   time.Now(),
-	}, nil
+		config:    cfg,
+		uploader:  up,
+		now:       time.Now,
+		batch:     make([]*events.GitHubEvent, 0, cfg.BatchSize),
+		lastFlush: time.Now(),
+	}
+}
+
+type minioUploader struct {
+	client *minio.Client
+	bucket string
+}
+
+func (u *minioUploader) Upload(ctx context.Context, key string, data []byte) error {
+	_, err := u.client.PutObject(ctx, u.bucket, key, bytes.NewReader(data), int64(len(data)),
+		minio.PutObjectOptions{ContentType: "application/vnd.apache.parquet"})
+	return err
 }
 
 // AddEvent adds an event to the batch and flushes when the batch is full.
@@ -121,19 +156,19 @@ func (w *S3Writer) AddEvent(event *events.GitHubEvent, done Done) {
 func (w *S3Writer) shouldFlush() bool {
 	return len(w.batch) >= w.config.BatchSize ||
 		w.batchSize >= w.config.BatchMaxBytes ||
-		time.Since(w.lastFlush) >= w.config.BatchTimeout
+		w.now().Sub(w.lastFlush) >= w.config.BatchTimeout
 }
 
 // FlushIfDue flushes when the batch timeout has passed.
 func (w *S3Writer) FlushIfDue() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if len(w.batch) > 0 && time.Since(w.lastFlush) >= w.config.BatchTimeout {
+	if len(w.batch) > 0 && w.now().Sub(w.lastFlush) >= w.config.BatchTimeout {
 		w.flushLocked()
 	}
 }
 
-// Flush writes the current batch to S3. A failed upload is logged here and
+// Flush writes the current batch. A failed upload is logged here and
 // reported to each event's Done callback.
 func (w *S3Writer) Flush() {
 	w.mu.Lock()
@@ -148,7 +183,7 @@ func (w *S3Writer) flushLocked() {
 		return
 	}
 
-	start := time.Now()
+	start := w.now()
 	eventCount := len(w.batch)
 	batchSize := w.batchSize
 	status := "success"
@@ -158,7 +193,7 @@ func (w *S3Writer) flushLocked() {
 		status = "upload_error"
 		slog.Error("Failed to write batch to S3", "event_count", eventCount, "error", err)
 	}
-	metrics.RecordS3Write(status, eventCount, batchSize, time.Since(start).Seconds())
+	metrics.RecordS3Write(status, eventCount, batchSize, w.now().Sub(start).Seconds())
 
 	for _, done := range w.done {
 		done(err)
@@ -166,7 +201,7 @@ func (w *S3Writer) flushLocked() {
 	w.batch = w.batch[:0]
 	w.done = w.done[:0]
 	w.batchSize = 0
-	w.lastFlush = time.Now()
+	w.lastFlush = w.now()
 }
 
 func (w *S3Writer) upload() error {
@@ -175,11 +210,8 @@ func (w *S3Writer) upload() error {
 		return fmt.Errorf("failed to encode parquet: %w", err)
 	}
 
-	key := w.generateS3Key()
-	_, err = w.minioClient.PutObject(context.Background(), w.config.Bucket, key,
-		bytes.NewReader(data), int64(len(data)),
-		minio.PutObjectOptions{ContentType: "application/vnd.apache.parquet"})
-	if err != nil {
+	key := w.objectKey()
+	if err := w.uploader.Upload(context.Background(), key, data); err != nil {
 		return fmt.Errorf("failed to upload to S3: %w", err)
 	}
 
@@ -220,9 +252,9 @@ func (w *S3Writer) encodeParquet(eventList []*events.GitHubEvent) ([]byte, error
 	return fw.Bytes(), nil
 }
 
-// generateS3Key returns prefix/YYYY/MM/DD/<unix nanos>.parquet
-func (w *S3Writer) generateS3Key() string {
-	now := time.Now().UTC()
+// objectKey returns prefix/YYYY/MM/DD/<unix nanos>.parquet
+func (w *S3Writer) objectKey() string {
+	now := w.now().UTC()
 	return fmt.Sprintf("%s/%04d/%02d/%02d/%d.parquet",
 		w.config.KeyPrefix, now.Year(), now.Month(), now.Day(), now.UnixNano())
 }
