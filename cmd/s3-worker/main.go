@@ -174,20 +174,18 @@ func processMessage(msg *nats.Msg, cfg *config.Config, s3Writer *storage.S3Write
 	var event events.GitHubEvent
 	if err := json.Unmarshal(msg.Data, &event); err != nil {
 		slog.Error("Dropping undecodable message", "subject", msg.Subject, "error", err)
-		msg.Term()
+		if err := msg.Term(); err != nil {
+			slog.Warn("Failed to terminate message", "subject", msg.Subject, "error", err)
+		}
 		return
 	}
 
 	if cfg.Processing.S3Filter != nil && !cfg.Processing.S3Filter.Matches(&event) {
-		msg.Ack()
+		natsInternal.AckOrNak(msg, nil)
 		return
 	}
 
 	s3Writer.AddEvent(&event, func(err error) {
-		if err != nil {
-			msg.Nak()
-		} else {
-			msg.Ack()
-		}
+		natsInternal.AckOrNak(msg, err)
 	})
 }

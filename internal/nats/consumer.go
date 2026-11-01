@@ -38,3 +38,17 @@ func EnsureConsumer(js nats.JetStreamContext, stream string, cc *nats.ConsumerCo
 	}
 	return fmt.Errorf("stream %s not found", stream)
 }
+
+// AckOrNak acks msg when err is nil and naks it otherwise. A failed ack
+// only delays the message: JetStream redelivers it after AckWait.
+func AckOrNak(msg *nats.Msg, err error) {
+	var ackErr error
+	if err != nil {
+		ackErr = msg.Nak()
+	} else {
+		ackErr = msg.Ack()
+	}
+	if ackErr != nil {
+		slog.Warn("Failed to acknowledge message", "subject", msg.Subject, "error", ackErr)
+	}
+}

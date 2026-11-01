@@ -132,15 +132,11 @@ func subscribeAndDispatch(ctx context.Context, js nats.JetStreamContext, cfg *co
 			}
 
 			for _, msg := range msgs {
-				// Process and dispatch message
-				if err := processAndDispatch(msg, cfg, publisher); err != nil {
+				err := processAndDispatch(msg, cfg, publisher)
+				if err != nil {
 					slog.Error("Error processing message", "error", err)
-					// NAK for retry
-					msg.Nak()
-				} else {
-					// ACK the message
-					msg.Ack()
 				}
+				natsInternal.AckOrNak(msg, err)
 			}
 		}
 	}
