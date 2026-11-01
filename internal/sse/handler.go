@@ -20,7 +20,6 @@ import (
 
 // Handler handles SSE connections directly with NATS
 type Handler struct {
-	nc          *nats.Conn
 	js          nats.JetStreamContext
 	cfg         *config.NATSConfig
 	clients     map[string]*ClientConnection
@@ -37,9 +36,8 @@ type ClientConnection struct {
 }
 
 // NewHandler creates a new SSE handler
-func NewHandler(nc *nats.Conn, js nats.JetStreamContext, cfg *config.NATSConfig) *Handler {
+func NewHandler(js nats.JetStreamContext, cfg *config.NATSConfig) *Handler {
 	return &Handler{
-		nc:      nc,
 		js:      js,
 		cfg:     cfg,
 		clients: make(map[string]*ClientConnection),

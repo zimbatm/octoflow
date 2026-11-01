@@ -49,7 +49,7 @@ func main() {
 	}
 
 	// Create SSE handler
-	sseHandler := sse.NewHandler(nc, js, &cfg.NATS)
+	sseHandler := sse.NewHandler(js, &cfg.NATS)
 
 	// Create router
 	router := createRouter(sseHandler, cfg)
