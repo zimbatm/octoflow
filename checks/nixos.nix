@@ -101,6 +101,6 @@ pkgs.testers.runNixOSTest {
 
     with subtest("the s3-worker writes the batch when it stops"):
       machine.succeed("systemctl stop octoflow-s3")
-      machine.succeed("journalctl -u octoflow-s3 | grep 'Uploaded batch to S3 event_count=1'")
+      machine.succeed("journalctl -u octoflow-s3 | grep 'msg=\"Uploaded batch to S3\" event_count=1'")
   '';
 }
