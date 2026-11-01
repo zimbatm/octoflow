@@ -20,8 +20,10 @@ type Config struct {
 
 type WebhookConfig struct {
 	ListenAddr string
-	// empty disables signature validation
+	// empty disables signature validation; the receiver refuses to start
+	// that way unless AllowUnsigned is set
 	Secret         string
+	AllowUnsigned  bool
 	MaxPayloadSize int64
 	RequestTimeout time.Duration
 	// empty allows every organization
@@ -84,6 +86,7 @@ func LoadFromEnv() (*Config, error) {
 		Webhook: WebhookConfig{
 			ListenAddr:     getEnvOrDefault("WEBHOOK_LISTEN_ADDR", ":8080"),
 			Secret:         os.Getenv("WEBHOOK_SECRET"),
+			AllowUnsigned:  envBool("WEBHOOK_ALLOW_UNSIGNED"),
 			MaxPayloadSize: 25 << 20,
 			RequestTimeout: 10 * time.Second,
 			AllowedOrgs:    splitList(os.Getenv("WEBHOOK_ALLOWED_ORGS")),
@@ -141,6 +144,11 @@ func getEnvOrDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func envBool(key string) bool {
+	b, _ := strconv.ParseBool(os.Getenv(key))
+	return b
 }
 
 func splitList(s string) []string {

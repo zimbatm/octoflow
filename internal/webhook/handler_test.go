@@ -193,3 +193,147 @@ func TestHandlerPublishFailure(t *testing.T) {
 		t.Errorf("Expected status 503, got %d", rec.Code)
 	}
 }
+
+func TestHandlerRejections(t *testing.T) {
+	const payload = `{"action":"opened","repository":{"full_name":"test-org/test-repo","owner":{"login":"test-org"}},"sender":{"login":"test-user"}}`
+	sign := func(secret, body string) string {
+		h := hmac.New(sha256.New, []byte(secret))
+		h.Write([]byte(body))
+		return "sha256=" + hex.EncodeToString(h.Sum(nil))
+	}
+
+	tests := []struct {
+		name    string
+		cfg     config.WebhookConfig
+		method  string
+		body    string
+		headers map[string]string
+		want    int
+	}{
+		{
+			name:   "GET is not a delivery",
+			method: "GET",
+			body:   payload,
+			want:   http.StatusMethodNotAllowed,
+		},
+		{
+			name:    "wrong content type",
+			body:    payload,
+			headers: map[string]string{"Content-Type": "text/plain"},
+			want:    http.StatusBadRequest,
+		},
+		{
+			name: "body over the limit",
+			cfg:  config.WebhookConfig{MaxPayloadSize: 16},
+			body: payload,
+			want: http.StatusRequestEntityTooLarge,
+		},
+		{
+			name: "secret set but no signature sent",
+			cfg:  config.WebhookConfig{Secret: "s"},
+			body: payload,
+			want: http.StatusUnauthorized,
+		},
+		{
+			name:    "signature without the sha256 prefix",
+			cfg:     config.WebhookConfig{Secret: "s"},
+			body:    payload,
+			headers: map[string]string{"X-Hub-Signature-256": sign("s", payload)[len("sha256="):]},
+			want:    http.StatusUnauthorized,
+		},
+		{
+			name:    "signature made with another secret",
+			cfg:     config.WebhookConfig{Secret: "s"},
+			body:    payload,
+			headers: map[string]string{"X-Hub-Signature-256": sign("other", payload)},
+			want:    http.StatusUnauthorized,
+		},
+		{
+			name: "organization not in the allow-list",
+			cfg:  config.WebhookConfig{AllowedOrgs: []string{"numtide"}},
+			body: payload,
+			want: http.StatusForbidden,
+		},
+		{
+			name: "payload is not JSON",
+			body: "{",
+			want: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.cfg.MaxPayloadSize == 0 {
+				tt.cfg.MaxPayloadSize = 1 << 20
+			}
+			published := make(chanPublisher, 1)
+			handler := NewHandler(&tt.cfg, published)
+
+			method := tt.method
+			if method == "" {
+				method = "POST"
+			}
+			req := httptest.NewRequest(method, "/webhook", bytes.NewBufferString(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-GitHub-Event", "pull_request")
+			req.Header.Set("X-GitHub-Delivery", "d-"+tt.name)
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
+
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			if rec.Code != tt.want {
+				t.Errorf("status = %d, want %d (body %q)", rec.Code, tt.want, rec.Body.String())
+			}
+			if len(published) != 0 {
+				t.Error("a rejected delivery was published")
+			}
+		})
+	}
+}
+
+func TestHandlerAcknowledgesPingWithoutPublishing(t *testing.T) {
+	published := make(chanPublisher, 1)
+	handler := NewHandler(&config.WebhookConfig{MaxPayloadSize: 1 << 20}, published)
+
+	req := httptest.NewRequest("POST", "/webhook", bytes.NewBufferString(`{"zen":"Keep it logically awesome.","hook_id":1}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "ping")
+	req.Header.Set("X-GitHub-Delivery", "ping-1")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("content type = %q", ct)
+	}
+	if len(published) != 0 {
+		t.Error("ping was published as an event")
+	}
+}
+
+func TestHandlerTimesOutSlowPublisher(t *testing.T) {
+	cfg := &config.WebhookConfig{MaxPayloadSize: 1 << 20, RequestTimeout: 50 * time.Millisecond}
+	handler := NewHandler(cfg, blockingPublisher{})
+
+	req := httptest.NewRequest("POST", "/webhook", bytes.NewBufferString(`{"action":"opened"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-GitHub-Event", "pull_request")
+	req.Header.Set("X-GitHub-Delivery", "slow-1")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", rec.Code)
+	}
+}
+
+type blockingPublisher struct{}
+
+func (blockingPublisher) PublishEvent(ctx context.Context, e *events.GitHubEvent) error {
+	<-ctx.Done()
+	return ctx.Err()
+}

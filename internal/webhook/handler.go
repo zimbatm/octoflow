@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -64,9 +65,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read the body with size limit
-	body, err := io.ReadAll(io.LimitReader(r.Body, h.config.MaxPayloadSize))
+	r.Body = http.MaxBytesReader(w, r.Body, h.config.MaxPayloadSize)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		var tooBig *http.MaxBytesError
+		if errors.As(err, &tooBig) {
+			http.Error(w, "Payload too large", http.StatusRequestEntityTooLarge)
+			status = "too_large"
+			return
+		}
 		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		status = "read_error"
 		return
