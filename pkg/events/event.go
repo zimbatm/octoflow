@@ -5,38 +5,39 @@ import (
 	"time"
 )
 
-// GitHubEvent represents a GitHub webhook event with metadata for processing
+// GitHubEvent is the message stored in JetStream. The parquet schema lives
+// in internal/storage.
 type GitHubEvent struct {
 	// Event metadata from GitHub headers
-	ID               string `json:"id" parquet:"name=id, type=BYTE_ARRAY, convertedtype=UTF8"`                                         // X-GitHub-Delivery
-	Event            string `json:"event" parquet:"name=event, type=BYTE_ARRAY, convertedtype=UTF8"`                                   // X-GitHub-Event
-	Signature        string `json:"signature,omitempty" parquet:"name=signature, type=BYTE_ARRAY, convertedtype=UTF8"`                 // X-Hub-Signature-256
-	HookID           string `json:"hook_id,omitempty" parquet:"name=hook_id, type=BYTE_ARRAY, convertedtype=UTF8"`                     // X-GitHub-Hook-ID
-	HookInstallation string `json:"hook_installation,omitempty" parquet:"name=hook_installation, type=BYTE_ARRAY, convertedtype=UTF8"` // X-GitHub-Hook-Installation-Target-ID
+	ID               string `json:"id"`                          // X-GitHub-Delivery
+	Event            string `json:"event"`                       // X-GitHub-Event
+	Signature        string `json:"signature,omitempty"`         // X-Hub-Signature-256
+	HookID           string `json:"hook_id,omitempty"`           // X-GitHub-Hook-ID
+	HookInstallation string `json:"hook_installation,omitempty"` // X-GitHub-Hook-Installation-Target-ID
 
 	// Timestamp when we received the event
-	ReceivedAt time.Time `json:"received_at" parquet:"name=received_at, type=INT64, convertedtype=TIMESTAMP_MILLIS"`
+	ReceivedAt time.Time `json:"received_at"`
 
 	// Event payload
-	Payload json.RawMessage `json:"payload" parquet:"name=payload, type=BYTE_ARRAY, convertedtype=UTF8"` // Raw JSON payload
+	Payload json.RawMessage `json:"payload"`
 
 	// Parsed common fields for filtering/routing
-	Repository   string `json:"repository,omitempty" parquet:"name=repository, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Organization string `json:"organization,omitempty" parquet:"name=organization, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Sender       string `json:"sender,omitempty" parquet:"name=sender, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Action       string `json:"action,omitempty" parquet:"name=action, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Repository   string `json:"repository,omitempty"`
+	Organization string `json:"organization,omitempty"`
+	Sender       string `json:"sender,omitempty"`
+	Action       string `json:"action,omitempty"`
 
 	// Numeric IDs for rename-proof identification
-	OrganizationID string `json:"organization_id,omitempty" parquet:"name=organization_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	RepositoryID   string `json:"repository_id,omitempty" parquet:"name=repository_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	SenderID       string `json:"sender_id,omitempty" parquet:"name=sender_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	OrganizationID string `json:"organization_id,omitempty"`
+	RepositoryID   string `json:"repository_id,omitempty"`
+	SenderID       string `json:"sender_id,omitempty"`
 
 	// Processing metadata
-	ProcessingVersion int `json:"processing_version" parquet:"name=processing_version, type=INT32"`
-	Retries           int `json:"retries" parquet:"name=retries, type=INT32"`
+	ProcessingVersion int `json:"processing_version"`
+	Retries           int `json:"retries"`
 
 	// Metadata for SSE streaming context
-	Metadata map[string]string `json:"metadata,omitempty"` // Additional metadata for SSE clients
+	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
 // EventFilter defines criteria for filtering events
