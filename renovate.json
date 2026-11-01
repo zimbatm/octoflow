@@ -1,0 +1,14 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "nix": { "enabled": true },
+  "lockFileMaintenance": { "enabled": true, "schedule": ["before 6am on monday"] },
+  "postUpdateOptions": ["gomodTidy"],
+  "packageRules": [
+    {
+      "matchManagers": ["gomod"],
+      "groupName": "go modules",
+      "description": "package.nix vendorHash must be recomputed by hand after a go.mod change; CI fails until it is"
+    }
+  ]
+}
