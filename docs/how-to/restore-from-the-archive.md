@@ -64,8 +64,9 @@ again; the new files repeat the old ones. That is expected after a
 stream loss; for a reprocessing run, stop the s3 service first if you
 do not want the archive to grow.
 
-## What is not restored
+## What comes back
 
-`metadata` (the public-ingest source fields) is not in the Parquet
-schema, so restored public events have none. Fan-out copies are not
-stored; the dispatcher recreates them.
+Every field of the event, including `metadata` for public-ingest events.
+Files written before the `metadata` column existed (before 2026-11-01)
+restore without it. Fan-out copies are not archived; the dispatcher
+recreates them from the restored primary events.

@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -33,10 +34,19 @@ type parquetRow struct {
 	OrganizationID   string `parquet:"name=organization_id, type=BYTE_ARRAY, convertedtype=UTF8"`
 	RepositoryID     string `parquet:"name=repository_id, type=BYTE_ARRAY, convertedtype=UTF8"`
 	SenderID         string `parquet:"name=sender_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	// JSON object, empty when the event has no metadata. Files written
+	// before this column existed decode with it empty.
+	Metadata string `parquet:"name=metadata, type=BYTE_ARRAY, convertedtype=UTF8"`
 }
 
 func toRow(e *events.GitHubEvent) parquetRow {
+	var metadata string
+	if len(e.Metadata) > 0 {
+		b, _ := json.Marshal(e.Metadata)
+		metadata = string(b)
+	}
 	return parquetRow{
+		Metadata:         metadata,
 		ID:               e.ID,
 		Event:            e.Event,
 		HookID:           e.HookID,

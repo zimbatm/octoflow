@@ -66,8 +66,9 @@ this order:
 | `organization_id` | UTF8 | `organization_id` |
 | `repository_id` | UTF8 | `repository_id` |
 | `sender_id` | UTF8 | `sender_id` |
+| `metadata` | UTF8 | `metadata` as a JSON object, empty when the event has none; absent in files written before 2026-11-01 |
 
-`metadata` is not stored in Parquet. Files are Snappy-compressed with
+Files are Snappy-compressed with
 row groups of 10000 and named
 `{S3_KEY_PREFIX}/{YYYY}/{MM}/{DD}/{unix nanoseconds}.parquet`, by the
 upload time in UTC.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/xitongsys/parquet-go-source/buffer"
 	"github.com/xitongsys/parquet-go/reader"
+	"github.com/xitongsys/parquet-go/writer"
 	"github.com/zimbatm/octoflow/internal/config"
 	"github.com/zimbatm/octoflow/pkg/events"
 )
@@ -216,7 +217,7 @@ func TestDecodeParquetRestoresTheEvent(t *testing.T) {
 	}
 	got := out[0]
 	want := *in
-	want.Metadata = nil // not archived
+	// metadata survives the round trip as a JSON column
 	if !got.ReceivedAt.Equal(received) {
 		t.Errorf("received_at = %v, want %v (millisecond precision)", got.ReceivedAt, received)
 	}
@@ -232,5 +233,27 @@ func TestDayPrefix(t *testing.T) {
 	got := DayPrefix("github-events", time.Date(2026, 1, 5, 23, 59, 0, 0, time.FixedZone("x", 3600)))
 	if got != "github-events/2026/01/05/" {
 		t.Errorf("DayPrefix = %q", got)
+	}
+}
+
+func TestDecodeParquetReadsFilesWithoutTheMetadataColumn(t *testing.T) {
+	fw := buffer.NewBufferFile()
+	pw, err := writer.NewParquetWriter(fw, new(legacyRow), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.Write(legacyRow{ID: "old", Event: "push", ReceivedAt: 1, Payload: `{}`, Repository: "o/r"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pw.WriteStop(); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := DecodeParquet(fw.Bytes())
+	if err != nil {
+		t.Fatalf("a file without the metadata column must still decode: %v", err)
+	}
+	if len(out) != 1 || out[0].ID != "old" || out[0].Metadata != nil || out[0].Repository != "o/r" {
+		t.Errorf("decoded %+v", out[0])
 	}
 }
