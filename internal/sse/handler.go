@@ -3,6 +3,7 @@ package sse
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -77,8 +78,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID str
 	h.registerClient(client)
 	defer h.unregisterClient(clientID)
 
-	// Send initial retry suggestion
-	sseWriter.WriteRetry(5000) // 5 seconds
+	if err := sseWriter.WriteRetry(5000); err != nil {
+		return
+	}
 
 	// Create context that cancels when client disconnects
 	ctx := r.Context()
@@ -90,10 +92,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID str
 			"error", err,
 			"subjects", subjects,
 			"client_id", clientID)
-		sseWriter.WriteEvent("", "error", []byte(`{"error":"Failed to create subscription"}`))
+		_ = sseWriter.WriteEvent("", "error", []byte(`{"error":"Failed to create subscription"}`))
 		return
 	}
-	defer sub.Unsubscribe()
+	defer func() { _ = sub.Unsubscribe() }()
 
 	// Send connected event
 	connectedMsg := map[string]string{
@@ -102,7 +104,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID str
 		"subjects":  strings.Join(subjects, ","),
 	}
 	connectedData, _ := json.Marshal(connectedMsg)
-	sseWriter.WriteEvent("", "connected", connectedData)
+	if err := sseWriter.WriteEvent("", "connected", connectedData); err != nil {
+		return
+	}
 
 	// Start heartbeat
 	heartbeat := time.NewTicker(30 * time.Second)
@@ -154,7 +158,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, streamID str
 		case err := <-errCh:
 			// Fatal error in fetch loop
 			slog.Error("Fatal error in SSE handler", "error", err, "client_id", clientID)
-			sseWriter.WriteEvent("", "error", []byte(fmt.Sprintf(`{"error":"Stream error: %s"}`, err.Error())))
+			_ = sseWriter.WriteEvent("", "error", []byte(fmt.Sprintf(`{"error":"Stream error: %s"}`, err.Error())))
 			return
 
 		case <-heartbeat.C:
@@ -230,16 +234,24 @@ func (h *Handler) createSubscription(ctx context.Context, subjects []string, las
 	}
 	sub, err := h.js.PullSubscribe("", name, nats.Bind(h.cfg.StreamName, name))
 	if err != nil {
-		h.js.DeleteConsumer(h.cfg.StreamName, name)
+		h.deleteConsumer(name)
 		return nil, fmt.Errorf("failed to create subscription: %w", err)
 	}
 
 	go func() {
 		<-ctx.Done()
-		h.js.DeleteConsumer(h.cfg.StreamName, name)
+		h.deleteConsumer(name)
 	}()
 
 	return sub, nil
+}
+
+// deleteConsumer is best effort: InactiveThreshold removes what it misses.
+func (h *Handler) deleteConsumer(name string) {
+	err := h.js.DeleteConsumer(h.cfg.StreamName, name)
+	if err != nil && !errors.Is(err, nats.ErrConsumerNotFound) {
+		slog.Warn("Failed to delete consumer", "consumer", name, "error", err)
+	}
 }
 
 // startSeqForLast returns the sequence from which exactly the last n
@@ -295,7 +307,7 @@ func (h *Handler) pendingFrom(subjects []string, seq uint64) (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("failed to probe stream: %w", err)
 	}
-	h.js.DeleteConsumer(h.cfg.StreamName, name)
+	h.deleteConsumer(name)
 	return info.NumPending, nil
 }
 
