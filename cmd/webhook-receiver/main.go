@@ -23,6 +23,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load configuration: %v", err)
 	}
+	if cfg.Webhook.Secret == "" {
+		slog.Warn("WEBHOOK_SECRET is not set; unsigned deliveries are accepted")
+	}
 
 	// Create NATS connection
 	nc, err := nats.Connect(&cfg.NATS)
