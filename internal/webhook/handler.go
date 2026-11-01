@@ -75,13 +75,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Extract GitHub headers
 	deliveryID := r.Header.Get("X-GitHub-Delivery")
-	eventType = r.Header.Get("X-GitHub-Event")
+	headerEvent := r.Header.Get("X-GitHub-Event")
 	signature := r.Header.Get("X-Hub-Signature-256")
 	hookID := r.Header.Get("X-GitHub-Hook-ID")
 	hookInstallation := r.Header.Get("X-GitHub-Hook-Installation-Target-ID")
 
 	// Validate required headers
-	if deliveryID == "" || eventType == "" {
+	if deliveryID == "" || headerEvent == "" {
 		http.Error(w, "Missing required GitHub headers", http.StatusBadRequest)
 		status = "missing_headers"
 		return
@@ -93,6 +93,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		status = "invalid_signature"
 		return
 	}
+	// the header becomes a metric label; only verified requests may create series.
+	eventType = headerEvent
 
 	// Create event
 	event := &events.GitHubEvent{
