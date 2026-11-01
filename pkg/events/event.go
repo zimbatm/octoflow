@@ -32,10 +32,6 @@ type GitHubEvent struct {
 	RepositoryID   string `json:"repository_id,omitempty"`
 	SenderID       string `json:"sender_id,omitempty"`
 
-	// Processing metadata
-	ProcessingVersion int `json:"processing_version"`
-	Retries           int `json:"retries"`
-
 	// Metadata for SSE streaming context
 	Metadata map[string]string `json:"metadata,omitempty"`
 }

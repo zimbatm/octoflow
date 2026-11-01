@@ -105,15 +105,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Create event
 	event := &events.GitHubEvent{
-		ID:                deliveryID,
-		Event:             eventType,
-		Signature:         signature,
-		HookID:            hookID,
-		HookInstallation:  hookInstallation,
-		ReceivedAt:        time.Now().UTC(),
-		Payload:           json.RawMessage(body),
-		ProcessingVersion: 1,
-		Retries:           0,
+		ID:               deliveryID,
+		Event:            eventType,
+		HookID:           hookID,
+		HookInstallation: hookInstallation,
+		ReceivedAt:       time.Now().UTC(),
+		Payload:          json.RawMessage(body),
 	}
 
 	// Parse common fields from payload

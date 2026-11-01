@@ -95,11 +95,10 @@ func ToGitHubEvent(e *Event, owner Account, source string) (*events.GitHubEvent,
 	}
 
 	ev := &events.GitHubEvent{
-		ID:                MsgIDPrefix + e.ID,
-		Event:             WebhookName(e.Type),
-		ReceivedAt:        time.Now().UTC(),
-		Payload:           raw,
-		ProcessingVersion: 1,
+		ID:         MsgIDPrefix + e.ID,
+		Event:      WebhookName(e.Type),
+		ReceivedAt: time.Now().UTC(),
+		Payload:    raw,
 		Metadata: map[string]string{
 			"source":          source,
 			"github_event_id": e.ID,

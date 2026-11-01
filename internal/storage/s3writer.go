@@ -22,42 +22,36 @@ import (
 // parquetRow is the on-disk schema. parquet-go cannot encode time.Time,
 // json.RawMessage or maps, so GitHubEvent is not used directly.
 type parquetRow struct {
-	ID                string `parquet:"name=id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Event             string `parquet:"name=event, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Signature         string `parquet:"name=signature, type=BYTE_ARRAY, convertedtype=UTF8"`
-	HookID            string `parquet:"name=hook_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	HookInstallation  string `parquet:"name=hook_installation, type=BYTE_ARRAY, convertedtype=UTF8"`
-	ReceivedAt        int64  `parquet:"name=received_at, type=INT64, convertedtype=TIMESTAMP_MILLIS"`
-	Payload           string `parquet:"name=payload, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Repository        string `parquet:"name=repository, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Organization      string `parquet:"name=organization, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Sender            string `parquet:"name=sender, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Action            string `parquet:"name=action, type=BYTE_ARRAY, convertedtype=UTF8"`
-	OrganizationID    string `parquet:"name=organization_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	RepositoryID      string `parquet:"name=repository_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	SenderID          string `parquet:"name=sender_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	ProcessingVersion int32  `parquet:"name=processing_version, type=INT32"`
-	Retries           int32  `parquet:"name=retries, type=INT32"`
+	ID               string `parquet:"name=id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Event            string `parquet:"name=event, type=BYTE_ARRAY, convertedtype=UTF8"`
+	HookID           string `parquet:"name=hook_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	HookInstallation string `parquet:"name=hook_installation, type=BYTE_ARRAY, convertedtype=UTF8"`
+	ReceivedAt       int64  `parquet:"name=received_at, type=INT64, convertedtype=TIMESTAMP_MILLIS"`
+	Payload          string `parquet:"name=payload, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Repository       string `parquet:"name=repository, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Organization     string `parquet:"name=organization, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Sender           string `parquet:"name=sender, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Action           string `parquet:"name=action, type=BYTE_ARRAY, convertedtype=UTF8"`
+	OrganizationID   string `parquet:"name=organization_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	RepositoryID     string `parquet:"name=repository_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	SenderID         string `parquet:"name=sender_id, type=BYTE_ARRAY, convertedtype=UTF8"`
 }
 
 func toRow(e *events.GitHubEvent) parquetRow {
 	return parquetRow{
-		ID:                e.ID,
-		Event:             e.Event,
-		Signature:         e.Signature,
-		HookID:            e.HookID,
-		HookInstallation:  e.HookInstallation,
-		ReceivedAt:        e.ReceivedAt.UnixMilli(),
-		Payload:           string(e.Payload),
-		Repository:        e.Repository,
-		Organization:      e.Organization,
-		Sender:            e.Sender,
-		Action:            e.Action,
-		OrganizationID:    e.OrganizationID,
-		RepositoryID:      e.RepositoryID,
-		SenderID:          e.SenderID,
-		ProcessingVersion: int32(e.ProcessingVersion),
-		Retries:           int32(e.Retries),
+		ID:               e.ID,
+		Event:            e.Event,
+		HookID:           e.HookID,
+		HookInstallation: e.HookInstallation,
+		ReceivedAt:       e.ReceivedAt.UnixMilli(),
+		Payload:          string(e.Payload),
+		Repository:       e.Repository,
+		Organization:     e.Organization,
+		Sender:           e.Sender,
+		Action:           e.Action,
+		OrganizationID:   e.OrganizationID,
+		RepositoryID:     e.RepositoryID,
+		SenderID:         e.SenderID,
 	}
 }
 
