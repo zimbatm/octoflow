@@ -2,6 +2,7 @@ package events
 
 import (
 	"encoding/json"
+	"slices"
 	"time"
 )
 
@@ -36,68 +37,27 @@ type GitHubEvent struct {
 	Metadata map[string]string `json:"metadata,omitempty"`
 }
 
-// EventFilter defines criteria for filtering events
+// EventFilter keeps the events whose type and action are listed; an empty
+// list accepts every value, and a nil filter accepts every event.
 type EventFilter struct {
-	Events        []string `json:"events,omitempty"`        // Filter by event types
-	Repositories  []string `json:"repositories,omitempty"`  // Filter by repository names
-	Organizations []string `json:"organizations,omitempty"` // Filter by organization names
-	Senders       []string `json:"senders,omitempty"`       // Filter by sender usernames
-	Actions       []string `json:"actions,omitempty"`       // Filter by action types
+	Events  []string
+	Actions []string
 }
 
-// Matches returns true if the event matches the filter criteria
 func (f *EventFilter) Matches(event *GitHubEvent) bool {
-	// If no filters are specified, match all events
-	if f == nil || (len(f.Events) == 0 && len(f.Repositories) == 0 &&
-		len(f.Organizations) == 0 && len(f.Senders) == 0 && len(f.Actions) == 0) {
+	if f == nil {
 		return true
 	}
-
-	// Check event type filter
-	if len(f.Events) > 0 && !contains(f.Events, event.Event) {
-		return false
-	}
-
-	// Check repository filter
-	if len(f.Repositories) > 0 && !contains(f.Repositories, event.Repository) {
-		return false
-	}
-
-	// Check organization filter
-	if len(f.Organizations) > 0 && !contains(f.Organizations, event.Organization) {
-		return false
-	}
-
-	// Check sender filter
-	if len(f.Senders) > 0 && !contains(f.Senders, event.Sender) {
-		return false
-	}
-
-	// Check action filter
-	if len(f.Actions) > 0 && !contains(f.Actions, event.Action) {
-		return false
-	}
-
-	return true
+	return (len(f.Events) == 0 || slices.Contains(f.Events, event.Event)) &&
+		(len(f.Actions) == 0 || slices.Contains(f.Actions, event.Action))
 }
 
-// Helper function to check if a slice contains a string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-// EventEntities represents all entities involved in a GitHub event
-// Used by the event dispatcher to route events to entity-specific subjects
+// EventEntities is what the dispatcher routes an event to.
 type EventEntities struct {
-	OrganizationID string   `json:"organization_id,omitempty"`
-	RepositoryID   string   `json:"repository_id,omitempty"`
-	SenderID       string   `json:"sender_id,omitempty"`
-	UserIDs        []string `json:"user_ids,omitempty"`     // All users involved (sender, assignees, reviewers, etc.)
-	PRNumber       int      `json:"pr_number,omitempty"`    // Pull request number if applicable
-	IssueNumber    int      `json:"issue_number,omitempty"` // Issue number if applicable
+	RepositoryID string
+	// every involved user: sender, author, assignees, requested reviewers,
+	// comment and review authors, team members
+	UserIDs     []string
+	PRNumber    int
+	IssueNumber int
 }

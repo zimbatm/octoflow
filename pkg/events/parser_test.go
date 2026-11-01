@@ -2,6 +2,7 @@ package events
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -74,189 +75,57 @@ func TestParseCommonFields(t *testing.T) {
 	}
 }
 
-func TestValidateEvent(t *testing.T) {
-	tests := []struct {
-		name    string
-		event   *GitHubEvent
-		wantErr bool
-	}{
-		{
-			name: "valid event",
-			event: &GitHubEvent{
-				ID:      "123",
-				Event:   "push",
-				Payload: json.RawMessage(`{"test": "data"}`),
-			},
-			wantErr: false,
-		},
-		{
-			name: "missing ID",
-			event: &GitHubEvent{
-				Event:   "push",
-				Payload: json.RawMessage(`{"test": "data"}`),
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing event type",
-			event: &GitHubEvent{
-				ID:      "123",
-				Payload: json.RawMessage(`{"test": "data"}`),
-			},
-			wantErr: true,
-		},
-		{
-			name: "missing payload",
-			event: &GitHubEvent{
-				ID:    "123",
-				Event: "push",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid JSON payload",
-			event: &GitHubEvent{
-				ID:      "123",
-				Event:   "push",
-				Payload: json.RawMessage(`{invalid json`),
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateEvent(tt.event)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("ValidateEvent() error = %v, wantErr %v", err, tt.wantErr)
-			}
-		})
-	}
-}
-
 func TestEventFilterMatches(t *testing.T) {
-	filter := &EventFilter{
-		Events:        []string{"push", "pull_request"},
-		Organizations: []string{"test-org", "another-org"},
-		Repositories:  []string{"test-org/repo1", "another-org/repo2"},
-	}
+	push := &GitHubEvent{Event: "push"}
+	opened := &GitHubEvent{Event: "pull_request", Action: "opened"}
+	closed := &GitHubEvent{Event: "pull_request", Action: "closed"}
 
-	tests := []struct {
-		name  string
-		event *GitHubEvent
-		want  bool
-	}{
-		{
-			name: "matches all criteria",
-			event: &GitHubEvent{
-				Event:        "push",
-				Organization: "test-org",
-				Repository:   "test-org/repo1",
-			},
-			want: true,
-		},
-		{
-			name: "matches event and org but not repo",
-			event: &GitHubEvent{
-				Event:        "push",
-				Organization: "test-org",
-				Repository:   "test-org/different-repo",
-			},
-			want: false,
-		},
-		{
-			name: "matches nothing",
-			event: &GitHubEvent{
-				Event:        "issues",
-				Organization: "different-org",
-				Repository:   "different-repo",
-			},
-			want: false,
-		},
-		{
-			name: "empty filter matches all",
-			event: &GitHubEvent{
-				Event:        "any-event",
-				Organization: "any-org",
-				Repository:   "any-repo",
-			},
-			want: true,
-		},
+	var nilFilter *EventFilter
+	if !nilFilter.Matches(push) || !(&EventFilter{}).Matches(push) {
+		t.Error("a nil or empty filter must accept every event")
 	}
-
-	// Test with populated filter
-	for _, tt := range tests {
-		if tt.name == "empty filter matches all" {
-			continue
-		}
-		t.Run(tt.name, func(t *testing.T) {
-			if got := filter.Matches(tt.event); got != tt.want {
-				t.Errorf("EventFilter.Matches() = %v, want %v", got, tt.want)
-			}
-		})
+	byType := &EventFilter{Events: []string{"pull_request", "issues"}}
+	if byType.Matches(push) || !byType.Matches(opened) {
+		t.Error("type filter")
 	}
-
-	// Test with empty filter
-	emptyFilter := &EventFilter{}
-	event := &GitHubEvent{
-		Event:        "any-event",
-		Organization: "any-org",
-		Repository:   "any-repo",
+	byAction := &EventFilter{Actions: []string{"opened"}}
+	if byAction.Matches(closed) || !byAction.Matches(opened) {
+		t.Error("action filter")
 	}
-	if !emptyFilter.Matches(event) {
-		t.Error("Empty filter should match all events")
+	both := &EventFilter{Events: []string{"pull_request"}, Actions: []string{"closed"}}
+	if both.Matches(opened) || !both.Matches(closed) || both.Matches(push) {
+		t.Error("type and action must both match")
 	}
 }
 
-func TestEventFilterMatchesPartial(t *testing.T) {
-	// Filter with only event types
-	eventFilter := &EventFilter{
-		Events: []string{"push", "pull_request"},
+func TestParseCommonFieldsKeepsWhatItCanOnOddShapes(t *testing.T) {
+	e := &GitHubEvent{Payload: json.RawMessage(`{"repository":"not an object","sender":{"id":"42","login":"x"},"organization":{"id":7,"login":"o"}}`)}
+	if err := ParseCommonFields(e); err != nil {
+		t.Fatalf("a type mismatch must not be an error: %v", err)
 	}
-
-	pushEvent := &GitHubEvent{
-		Event:        "push",
-		Organization: "any-org",
-		Repository:   "any-repo",
+	if e.Sender != "x" || e.SenderID != "42" || e.OrganizationID != "7" || e.Repository != "" {
+		t.Errorf("parsed %+v", e)
 	}
-
-	issuesEvent := &GitHubEvent{
-		Event:        "issues",
-		Organization: "any-org",
-		Repository:   "any-repo",
+	if err := ParseCommonFields(&GitHubEvent{Payload: json.RawMessage(`{`)}); err == nil {
+		t.Error("invalid JSON must be an error")
 	}
+}
 
-	if !eventFilter.Matches(pushEvent) {
-		t.Error("Filter should match push event")
+func TestExtractEventEntitiesUsers(t *testing.T) {
+	e := &GitHubEvent{Event: "pull_request_review", SenderID: "1", RepositoryID: "7", Payload: json.RawMessage(`{
+		"pull_request": {"number": 5, "user": {"id": 2}, "assignees": [{"id": 3}, {"id": 1}], "requested_reviewers": [{"id": 4}]},
+		"review": {"user": {"id": 1}},
+		"comment": {"user": {"id": 5}}
+	}`)}
+	got, err := ExtractEventEntities(e)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	if eventFilter.Matches(issuesEvent) {
-		t.Error("Filter should not match issues event")
+	if got.RepositoryID != "7" || got.PRNumber != 5 {
+		t.Errorf("entities = %+v", got)
 	}
-
-	// Filter with only organizations
-	orgFilter := &EventFilter{
-		Organizations: []string{"allowed-org"},
-	}
-
-	allowedEvent := &GitHubEvent{
-		Event:        "any-event",
-		Organization: "allowed-org",
-		Repository:   "any-repo",
-	}
-
-	blockedEvent := &GitHubEvent{
-		Event:        "any-event",
-		Organization: "blocked-org",
-		Repository:   "any-repo",
-	}
-
-	if !orgFilter.Matches(allowedEvent) {
-		t.Error("Filter should match allowed organization")
-	}
-
-	if orgFilter.Matches(blockedEvent) {
-		t.Error("Filter should not match blocked organization")
+	if want := "1 2 3 4 5"; strings.Join(got.UserIDs, " ") != want {
+		t.Errorf("users = %v, want %s: sender first, then author, assignees, reviewers, comment author, each once", got.UserIDs, want)
 	}
 }
 

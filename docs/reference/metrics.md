@@ -15,7 +15,7 @@ route kinds and sources, never ids, with one exception noted below.
 
 `status` values: `success`, `success_ping`, `invalid_signature`,
 `missing_headers`, `bad_content_type`, `method_not_allowed`,
-`too_large`, `read_error`, `org_not_allowed`, `invalid_event`,
+`too_large`, `read_error`, `org_not_allowed`, `invalid_payload`,
 `publish_error`. `organization` is the login from the payload, one
 series per organization that delivers.
 
@@ -68,12 +68,6 @@ metrics listener.
 | `octoflow_stream_messages` | messages in the stream, primary and copies |
 | `octoflow_stream_bytes` | bytes stored |
 | `octoflow_stream_consumers` | consumers, SSE connections included |
-
-## Errors
-
-| Series | Labels | Meaning |
-|---|---|---|
-| `octoflow_event_processing_errors_total` | `component`, `error_type` | currently `webhook`/`parse_error` when a payload's routing fields cannot be read |
 
 The Go runtime and process collectors of the Prometheus client are
 exposed as well.

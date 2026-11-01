@@ -98,11 +98,6 @@ var (
 		Name: "octoflow_stream_consumers",
 		Help: "Consumers on the events stream, including SSE clients",
 	})
-
-	EventProcessingErrors = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "octoflow_event_processing_errors_total",
-		Help: "Processing errors by component and kind",
-	}, []string{"component", "error_type"})
 )
 
 func RecordWebhookRequest(eventType, organization, status string, duration float64, payloadSize int) {

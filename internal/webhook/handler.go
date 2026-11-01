@@ -113,11 +113,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Payload:          json.RawMessage(body),
 	}
 
-	// Parse common fields from payload
 	if err := events.ParseCommonFields(event); err != nil {
-		// Log error but don't fail the request
-		slog.Error("Failed to parse common fields", "error", err)
-		metrics.EventProcessingErrors.WithLabelValues("webhook", "parse_error").Inc()
+		http.Error(w, "Payload is not JSON", http.StatusBadRequest)
+		status = "invalid_payload"
+		return
 	}
 	organization = event.Organization
 
@@ -138,13 +137,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !h.isOrgAllowed(event.Organization) {
 		http.Error(w, "Organization not allowed", http.StatusForbidden)
 		status = "org_not_allowed"
-		return
-	}
-
-	// Validate event
-	if err := events.ValidateEvent(event); err != nil {
-		http.Error(w, fmt.Sprintf("Invalid event: %v", err), http.StatusBadRequest)
-		status = "invalid_event"
 		return
 	}
 
