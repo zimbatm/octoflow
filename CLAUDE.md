@@ -6,7 +6,8 @@ Guidance for Claude Code when working in this repository.
 
 OctoFlow captures GitHub events, publishes them to NATS JetStream, backs
 them up to S3 as Parquet files and streams them to browsers over SSE.
-The README is the reference; this file lists what you need to work here.
+docs/README.md is the documentation index (Diátaxis: tutorials, how-to,
+reference, explanation); this file lists what you need to work here.
 
 ## Commands
 
@@ -102,7 +103,7 @@ See `.env.example`; `nix develop` loads `.env` when it exists.
 
 ## Scripts
 
-- `scripts/test-webhook.sh`: post a signed sample webhook
+- `scripts/test-webhook.sh`: post a signed sample webhook (org 222, repo 111, PR 7)
 - `scripts/test-sse.sh`: read the SSE endpoints
 - `scripts/test-system.sh`: start everything and check the health endpoints
 - `scripts/clear-streams.sh`: delete all NATS streams

@@ -1,61 +1,50 @@
 #!/usr/bin/env bash
-# Test script to send a sample GitHub webhook event
-
+#
+# Posts a signed sample pull_request delivery to a receiver.
+# The payload carries numeric ids (org 222, repo 111, PR 7, sender 2), so
+# the dispatcher routes it to the repo, user and pr subjects.
+#
+#   WEBHOOK_SECRET=change-me ./scripts/test-webhook.sh
+#   WEBHOOK_URL=https://events.example.org/webhook WEBHOOK_SECRET=... ./scripts/test-webhook.sh
+#
 set -euo pipefail
 
-# Default values
 WEBHOOK_URL="${WEBHOOK_URL:-http://localhost:8080/webhook}"
-WEBHOOK_SECRET="${WEBHOOK_SECRET:-}"  # Optional - if empty, no signature will be sent
+if [ -z "${WEBHOOK_SECRET:-}" ]; then
+    echo "WEBHOOK_SECRET is required: the receiver only accepts signed deliveries" >&2
+    exit 1
+fi
 
-# Sample GitHub webhook payload
 PAYLOAD='{
   "action": "opened",
+  "number": 7,
   "pull_request": {
     "id": 1,
-    "number": 1,
+    "number": 7,
     "state": "open",
     "title": "Test PR",
-    "created_at": "2025-01-26T12:00:00Z",
-    "updated_at": "2025-01-26T12:00:00Z",
+    "user": {"id": 2, "login": "test-user"},
+    "created_at": "2026-10-14T12:00:00Z",
     "merged": false
   },
   "repository": {
+    "id": 111,
+    "name": "test-repo",
     "full_name": "test-org/test-repo",
-    "owner": {
-      "login": "test-org"
-    }
+    "owner": {"id": 222, "login": "test-org"}
   },
-  "sender": {
-    "login": "test-user"
-  }
+  "organization": {"id": 222, "login": "test-org"},
+  "sender": {"id": 2, "login": "test-user"}
 }'
 
-# Generate signature if secret is provided
-if [ -n "$WEBHOOK_SECRET" ]; then
-  SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | sed 's/^.* //')
-  SIGNATURE_HEADER="-H \"X-Hub-Signature-256: sha256=$SIGNATURE\""
-else
-  SIGNATURE_HEADER=""
-  echo "WARNING: No webhook secret configured - sending without signature"
-fi
+SIGNATURE=$(printf '%s' "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | sed 's/^.* //')
 
-# Send webhook
 echo "Sending test webhook to $WEBHOOK_URL"
-if [ -n "$WEBHOOK_SECRET" ]; then
-  curl -X POST "$WEBHOOK_URL" \
-    -H "Content-Type: application/json" \
-    -H "X-GitHub-Event: pull_request" \
-    -H "X-GitHub-Delivery: test-$(date +%s)" \
-    -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
-    -H "X-GitHub-Hook-ID: 12345" \
-    -d "$PAYLOAD" \
-    -w "\nHTTP Status: %{http_code}\n"
-else
-  curl -X POST "$WEBHOOK_URL" \
-    -H "Content-Type: application/json" \
-    -H "X-GitHub-Event: pull_request" \
-    -H "X-GitHub-Delivery: test-$(date +%s)" \
-    -H "X-GitHub-Hook-ID: 12345" \
-    -d "$PAYLOAD" \
-    -w "\nHTTP Status: %{http_code}\n"
-fi
+curl -sS -X POST "$WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -H "X-GitHub-Event: pull_request" \
+  -H "X-GitHub-Delivery: test-$(date +%s)" \
+  -H "X-GitHub-Hook-ID: 12345" \
+  -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
+  --data-binary "$PAYLOAD" \
+  -w "\nHTTP Status: %{http_code}\n"
