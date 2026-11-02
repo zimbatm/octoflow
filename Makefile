@@ -22,9 +22,10 @@ fmt:
 	gofmt -w .
 	go mod tidy
 
-# all services as separate processes under hivemind, see Procfile
+# nats, rustfs and octoflow all under hivemind, see Procfile; needs .env
 run:
-	./scripts/start-local.sh
+	@test -f .env || { echo "copy .env.example to .env first"; exit 1; }
+	hivemind
 
 nats-server:
 	nats-server -c nats.conf

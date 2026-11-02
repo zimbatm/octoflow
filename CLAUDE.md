@@ -110,8 +110,6 @@ See `.env.example`; `nix develop` loads `.env` when it exists.
 ## Scripts
 
 - `scripts/test-webhook.sh`: post a signed sample webhook (org 222, repo 111, PR 7)
-- `scripts/test-sse.sh`: read the SSE endpoints
-- `scripts/test-system.sh`: start everything and check the health endpoints
 - `scripts/clear-streams.sh`: delete all NATS streams
 - `scripts/create-bucket.sh`: create the bucket on the local rustfs
 - `scripts/load.sh`: local throughput measurement, numbers in docs/explanation/architecture.md
