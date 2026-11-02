@@ -44,8 +44,8 @@ anything else is a 404.
 ## Stream contents
 
 See [Event format, SSE framing](event-format.md#sse-framing). In short:
-`retry: 5000`, a `connected` event, then one event per GitHub event
-named after its type with the stream sequence as `id`, a `: heartbeat`
+`retry: 5000`, a `connected` event, then one unnamed event per GitHub
+event with the stream sequence as `id` and the type in the data, a `: heartbeat`
 comment every 30 seconds, and an `error` event if the server loses
 JetStream.
 

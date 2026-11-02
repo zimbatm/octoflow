@@ -82,12 +82,13 @@ event: connected
 data: {"status":"connected","stream_id":"repo-111","subjects":"github.events.repo.111.>"}
 
 id: 1842
-event: pull_request
 data: <the JSON message above on one line>
 
 : heartbeat
 ```
 
-`id` is the JetStream stream sequence of the message; `event` is the
-GitHub event type; `data` is the message. `: heartbeat` comes every 30
+`id` is the JetStream stream sequence of the message; `data` is the
+message, with the GitHub event type in its `event` field. GitHub events
+carry no `event:` name, so a browser's `onmessage` sees every type; only
+`connected` and `error` are named. `: heartbeat` comes every 30
 seconds while nothing else does. An `event: error` ends the stream.

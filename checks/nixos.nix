@@ -84,7 +84,7 @@ pkgs.testers.runNixOSTest {
     with subtest("the event leaves through SSE on its org, repo and pr routes, once"):
       for route in ["org/222", "repo/111", "pr/111/7"]:
         out = machine.wait_until_succeeds(
-          f"timeout 3 curl -sN 'http://127.0.0.1:8181/events/{route}?last=10' | grep -c '^event: pull_request' || true",
+          f"timeout 3 curl -sN 'http://127.0.0.1:8181/events/{route}?last=10' | grep -c '\"event\":\"pull_request\"' || true",
           timeout=30,
         ).strip()
         assert out == "1", f"{route}: {out} events"
@@ -120,7 +120,7 @@ pkgs.testers.runNixOSTest {
       assert "published=1 duplicates=0" in out, out
       for route in ["org/222", "repo/111", "pr/111/7"]:
         out = machine.wait_until_succeeds(
-          f"timeout 3 curl -sN 'http://127.0.0.1:8181/events/{route}?last=10' | grep -c '^event: pull_request' || true",
+          f"timeout 3 curl -sN 'http://127.0.0.1:8181/events/{route}?last=10' | grep -c '\"event\":\"pull_request\"' || true",
           timeout=30,
         ).strip()
         assert out == "1", f"{route} after restore: {out} events"
@@ -139,7 +139,7 @@ pkgs.testers.runNixOSTest {
       ).strip()
       assert code == "200", f"big delivery: {code}"
       out = machine.wait_until_succeeds(
-        "timeout 3 curl -sN 'http://127.0.0.1:8181/events/type/push?last=1' | grep -c '^event: push' || true",
+        "timeout 3 curl -sN 'http://127.0.0.1:8181/events/type/push?last=1' | grep -c '\"event\":\"push\"' || true",
         timeout=30,
       ).strip()
       assert out == "1", f"type/push after the 2 MiB delivery: {out} events"

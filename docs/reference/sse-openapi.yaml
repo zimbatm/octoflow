@@ -243,7 +243,8 @@ components:
             type: string
             description: |
               The stream starts with `retry: 5000` and a `connected` event,
-              then one named event per GitHub event, and a `: heartbeat`
+              then one unnamed event per GitHub event (the type is in the
+              data), and a `: heartbeat`
               comment every 30 seconds while idle. An `error` event ends the
               stream when the server could not read from JetStream.
           examples:
@@ -257,7 +258,6 @@ components:
             pull_request:
               value: |
                 id: 1842
-                event: pull_request
                 data: {"id":"3fa3a85c-6a48-11f0-8793-19d640392600","event":"pull_request","action":"opened","received_at":"2026-10-14T12:00:00Z","repository":"NixOS/nixpkgs","repository_id":"4542716","organization":"NixOS","organization_id":"487568","sender":"zimbatm","sender_id":"2","payload":{}}
 
   schemas:

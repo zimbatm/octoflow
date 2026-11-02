@@ -119,7 +119,9 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string
 				slog.Error("Message without JetStream metadata", "error", err)
 				continue
 			}
-			if err := sw.WriteEvent(strconv.FormatUint(meta.Sequence.Stream, 10), event.Event, msg.Data); err != nil {
+			// no event name: a browser's onmessage then sees every type, and
+			// the type is in the data anyway. connected and error stay named.
+			if err := sw.WriteEvent(strconv.FormatUint(meta.Sequence.Stream, 10), "", msg.Data); err != nil {
 				return
 			}
 			lastWrite = time.Now()

@@ -114,7 +114,6 @@ event: connected
 data: {"status":"connected","stream_id":"repo-111","subjects":"github.events.repo.111.>"}
 
 id: 2
-event: pull_request
 data: {"id":"test-...","event":"pull_request","action":"opened",...}
 ```
 

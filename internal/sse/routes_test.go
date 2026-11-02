@@ -111,7 +111,7 @@ func (f *fixture) read(path string, lastEventID string, n int) ([]sseEvent, int)
 		line := sc.Text()
 		switch {
 		case line == "":
-			if cur.event != "" && cur.event != "connected" {
+			if data.Len() > 0 && cur.event != "connected" && cur.event != "error" {
 				if err := json.Unmarshal([]byte(data.String()), &cur.data); err != nil {
 					f.t.Fatalf("bad event data %q: %v", data.String(), err)
 				}

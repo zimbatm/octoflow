@@ -25,17 +25,17 @@ to filter, and `?last=N` to replay the last N matching events first
 const url = 'https://events.example.org/events/repo/4542716?type=pull_request&last=20';
 const source = new EventSource(url);
 
-source.addEventListener('pull_request', (e) => {
+source.onmessage = (e) => {
   const event = JSON.parse(e.data);
   console.log(`PR #${event.payload.number} ${event.action} by ${event.sender}`);
-});
+};
 
 source.addEventListener('connected', (e) => console.log('connected', e.data));
 source.onerror = () => console.log('reconnecting');
 ```
 
-Events are named after the GitHub event type, so `onmessage` never
-fires; use `addEventListener` per type. The `connected` event comes
+GitHub events carry no event name, so `onmessage` receives every type;
+the type is in `event.event`. The `connected` event comes
 first; `error` events end the stream when the server lost JetStream.
 
 ## 3. Resume after a reconnect

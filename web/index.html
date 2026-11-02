@@ -595,398 +595,219 @@
     </div>
     
     <script>
-        // The SSE routes share this page's origin unless the deployment splits
-        // them onto another host; then pass ?sse=https://host in the page URL.
-        const SSE_BASE = new URLSearchParams(location.search).get('sse') || location.origin;
+        const SSE_BASE = (new URLSearchParams(location.search).get('sse') || location.origin).replace(/\/+$/, '');
         let eventSource = null;
-        let stats = {
-            total: 0,
-            eventsPerMinute: 0,
-            timestamps: []
-        };
-        let currentSubscription = 'all';
-        let lookupCache = {};
+        let lastUrl = null;
+        let stats = { total: 0, timestamps: [] };
+        // ids already shown: a reconnect replays the last events
+        const seen = new Set();
+        const SEEN_MAX = 2000;
+        const lookupCache = {};
+        const lookupSeq = {};
 
-        // everything below comes from GitHub payloads and goes into innerHTML
+        // one row per subscription kind that resolves a GitHub name to an id
+        const lookups = {
+            org: { name: 'org-name', id: 'org-id', status: 'org-lookup-status', api: v => `/orgs/${v}`, label: d => d.name || d.login },
+            repo: { name: 'repo-name', id: 'repo-id', status: 'repo-lookup-status', api: v => `/repos/${v}`, label: d => d.full_name },
+            user: { name: 'user-name', id: 'user-id', status: 'user-lookup-status', api: v => `/users/${v}`, label: d => d.name || d.login },
+            pr: { name: 'pr-repo-name', id: 'pr-repo-id', status: 'pr-repo-lookup-status', api: v => `/repos/${v}`, label: d => d.full_name },
+            issue: { name: 'issue-repo-name', id: 'issue-repo-id', status: 'issue-repo-lookup-status', api: v => `/repos/${v}`, label: d => d.full_name },
+        };
+
+        // everything from GitHub payloads goes through here before innerHTML
         function esc(s) {
-            return String(s).replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+            return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
         }
-        
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            setupSubscriptionHandlers();
-            setupNameLookupHandlers();
-            // Auto-connect to firehose
-            applySubscription();
-            updateStatsEverySecond();
-        });
-        
-        function setupSubscriptionHandlers() {
-            const radioButtons = document.querySelectorAll('input[name="subscription"]');
-            radioButtons.forEach(radio => {
-                radio.addEventListener('change', function() {
-                    // Hide all inputs
-                    document.querySelectorAll('.subscription-input').forEach(input => {
-                        input.style.display = 'none';
-                    });
-                    
-                    // Show relevant input
-                    const inputId = this.value + '-input';
-                    const inputDiv = document.getElementById(inputId);
-                    if (inputDiv) {
-                        inputDiv.style.display = 'block';
-                    }
+
+        function $(id) { return document.getElementById(id); }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.querySelectorAll('input[name="subscription"]').forEach(radio => {
+                radio.addEventListener('change', () => {
+                    document.querySelectorAll('.subscription-input').forEach(div => { div.style.display = 'none'; });
+                    const div = $(radio.value + '-input');
+                    if (div) div.style.display = 'block';
                 });
             });
-        }
-        
-        function setupNameLookupHandlers() {
-            // Organization lookup
-            document.getElementById('org-name').addEventListener('input', debounce(function(e) {
-                lookupGitHubEntity('org', e.target.value);
-            }, 500));
-            
-            // Repository lookup
-            document.getElementById('repo-name').addEventListener('input', debounce(function(e) {
-                lookupGitHubEntity('repo', e.target.value);
-            }, 500));
-            
-            // User lookup
-            document.getElementById('user-name').addEventListener('input', debounce(function(e) {
-                lookupGitHubEntity('user', e.target.value);
-            }, 500));
-            
-            // PR repository lookup
-            document.getElementById('pr-repo-name').addEventListener('input', debounce(function(e) {
-                lookupGitHubEntity('pr-repo', e.target.value);
-            }, 500));
-            
-            // Issue repository lookup
-            document.getElementById('issue-repo-name').addEventListener('input', debounce(function(e) {
-                lookupGitHubEntity('issue-repo', e.target.value);
-            }, 500));
-        }
-        
+            for (const [kind, f] of Object.entries(lookups)) {
+                $(f.name).addEventListener('input', debounce(e => lookup(kind, e.target.value.trim()), 500));
+            }
+            applySubscription();
+            setInterval(updateStats, 1000);
+            setInterval(fetchStats, 5000);
+        });
+
         function debounce(func, wait) {
             let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
+            return (...args) => {
                 clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
+                timeout = setTimeout(() => func(...args), wait);
             };
         }
-        
-        async function lookupGitHubEntity(type, value) {
-            if (!value) return;
-            
-            // If it's already a number, assume it's an ID
+
+        function setStatus(f, text, cls) {
+            const el = $(f.status);
+            el.textContent = text;
+            el.className = 'lookup-status ' + cls;
+        }
+
+        async function lookup(kind, value) {
+            const f = lookups[kind];
+            // a later keystroke makes this lookup stale; its answer is dropped
+            const seq = (lookupSeq[kind] = (lookupSeq[kind] || 0) + 1);
+            $(f.id).value = '';
+            if (!value) {
+                setStatus(f, '', '');
+                return;
+            }
             if (/^\d+$/.test(value)) {
-                if (type === 'org') {
-                    document.getElementById('org-id').value = value;
-                    document.getElementById('org-lookup-status').textContent = '✓ Using ID';
-                    document.getElementById('org-lookup-status').className = 'lookup-status success';
-                } else if (type === 'repo') {
-                    document.getElementById('repo-id').value = value;
-                    document.getElementById('repo-lookup-status').textContent = '✓ Using ID';
-                    document.getElementById('repo-lookup-status').className = 'lookup-status success';
-                } else if (type === 'user') {
-                    document.getElementById('user-id').value = value;
-                    document.getElementById('user-lookup-status').textContent = '✓ Using ID';
-                    document.getElementById('user-lookup-status').className = 'lookup-status success';
-                } else if (type === 'pr-repo') {
-                    document.getElementById('pr-repo-id').value = value;
-                    document.getElementById('pr-repo-lookup-status').textContent = '✓ Using ID';
-                    document.getElementById('pr-repo-lookup-status').className = 'lookup-status success';
-                } else if (type === 'issue-repo') {
-                    document.getElementById('issue-repo-id').value = value;
-                    document.getElementById('issue-repo-lookup-status').textContent = '✓ Using ID';
-                    document.getElementById('issue-repo-lookup-status').className = 'lookup-status success';
-                }
+                $(f.id).value = value;
+                setStatus(f, '✓ Using ID', 'success');
                 return;
             }
-            
-            // Check cache first
-            const cacheKey = `${type}:${value}`;
+            const cacheKey = `${kind}:${value}`;
             if (lookupCache[cacheKey]) {
-                setLookupResult(type, lookupCache[cacheKey]);
+                $(f.id).value = lookupCache[cacheKey].id;
+                setStatus(f, `✓ ${f.label(lookupCache[cacheKey])}`, 'success');
                 return;
             }
-            
-            // Show loading status
-            const statusElement = document.getElementById(
-                type === 'pr-repo' ? 'pr-repo-lookup-status' : 
-                type === 'issue-repo' ? 'issue-repo-lookup-status' :
-                `${type}-lookup-status`
-            );
-            statusElement.textContent = 'Looking up...';
-            statusElement.className = 'lookup-status loading';
-            
+            setStatus(f, 'Looking up...', 'loading');
             try {
-                let apiUrl;
-                if (type === 'org') {
-                    apiUrl = `https://api.github.com/orgs/${value}`;
-                } else if (type === 'repo' || type === 'pr-repo' || type === 'issue-repo') {
-                    apiUrl = `https://api.github.com/repos/${value}`;
-                } else if (type === 'user') {
-                    apiUrl = `https://api.github.com/users/${value}`;
+                const response = await fetch('https://api.github.com' + f.api(value));
+                if (seq !== lookupSeq[kind]) return;
+                if (!response.ok) {
+                    setStatus(f, '✗ Not found', 'error');
+                    return;
                 }
-                
-                const response = await fetch(apiUrl);
-                if (response.ok) {
-                    const data = await response.json();
-                    lookupCache[cacheKey] = data;
-                    setLookupResult(type, data);
-                } else {
-                    statusElement.textContent = '✗ Not found';
-                    statusElement.className = 'lookup-status error';
-                }
+                const data = await response.json();
+                if (seq !== lookupSeq[kind]) return;
+                lookupCache[cacheKey] = data;
+                $(f.id).value = data.id;
+                setStatus(f, `✓ ${f.label(data)}`, 'success');
             } catch (error) {
+                if (seq !== lookupSeq[kind]) return;
                 console.error('GitHub API error:', error);
-                statusElement.textContent = '✗ Error';
-                statusElement.className = 'lookup-status error';
+                setStatus(f, '✗ Error', 'error');
             }
         }
-        
-        function setLookupResult(type, data) {
-            if (type === 'org') {
-                document.getElementById('org-id').value = data.id;
-                document.getElementById('org-lookup-status').textContent = `✓ ${data.name || data.login}`;
-                document.getElementById('org-lookup-status').className = 'lookup-status success';
-            } else if (type === 'repo') {
-                document.getElementById('repo-id').value = data.id;
-                document.getElementById('repo-lookup-status').textContent = `✓ ${data.full_name}`;
-                document.getElementById('repo-lookup-status').className = 'lookup-status success';
-            } else if (type === 'user') {
-                document.getElementById('user-id').value = data.id;
-                document.getElementById('user-lookup-status').textContent = `✓ ${data.name || data.login}`;
-                document.getElementById('user-lookup-status').className = 'lookup-status success';
-            } else if (type === 'pr-repo') {
-                document.getElementById('pr-repo-id').value = data.id;
-                document.getElementById('pr-repo-lookup-status').textContent = `✓ ${data.full_name}`;
-                document.getElementById('pr-repo-lookup-status').className = 'lookup-status success';
-            } else if (type === 'issue-repo') {
-                document.getElementById('issue-repo-id').value = data.id;
-                document.getElementById('issue-repo-lookup-status').textContent = `✓ ${data.full_name}`;
-                document.getElementById('issue-repo-lookup-status').className = 'lookup-status success';
-            }
-        }
-        
+
         function applySubscription() {
-            // Close existing connection
-            if (eventSource) {
-                eventSource.close();
-            }
-            
-            // Get selected subscription
-            const selectedRadio = document.querySelector('input[name="subscription"]:checked');
-            const subscriptionType = selectedRadio.value;
-            
-            let url = SSE_BASE;
-            let streamName = 'all';
-            
-            // Disable button during connection
-            const applyBtn = document.getElementById('apply-btn');
-            applyBtn.disabled = true;
-            
-            switch (subscriptionType) {
+            const kind = document.querySelector('input[name="subscription"]:checked').value;
+            const shown = f => {
+                const name = $(f.name).value.trim();
+                return /^\d+$/.test(name) ? $(f.id).value : name;
+            };
+            let path, streamName;
+            switch (kind) {
                 case 'all':
-                    url += '/events';
+                    path = '/events';
                     streamName = 'Firehose';
                     break;
                 case 'org':
-                    const orgId = document.getElementById('org-id').value;
-                    if (!orgId) {
-                        alert('Please enter an organization name or ID');
-                        applyBtn.disabled = false;
-                        return;
-                    }
-                    url += `/events/org/${orgId}`;
-                    const orgName = document.getElementById('org-name').value;
-                    streamName = `Org: ${/^\d+$/.test(orgName) ? orgId : orgName}`;
-                    break;
                 case 'repo':
-                    const repoId = document.getElementById('repo-id').value;
-                    if (!repoId) {
-                        alert('Please enter a repository name or ID');
-                        applyBtn.disabled = false;
+                case 'user': {
+                    const f = lookups[kind];
+                    const id = $(f.id).value;
+                    if (!id) {
+                        alert({ org: 'Please enter an organization name or ID', repo: 'Please enter a repository name or ID', user: 'Please enter a username or ID' }[kind]);
                         return;
                     }
-                    url += `/events/repo/${repoId}`;
-                    const repoName = document.getElementById('repo-name').value;
-                    streamName = `Repo: ${/^\d+$/.test(repoName) ? repoId : repoName}`;
+                    path = `/events/${kind}/${id}`;
+                    streamName = `${{ org: 'Org', repo: 'Repo', user: 'User' }[kind]}: ${shown(f)}`;
                     break;
-                case 'user':
-                    const userId = document.getElementById('user-id').value;
-                    if (!userId) {
-                        alert('Please enter a username or ID');
-                        applyBtn.disabled = false;
-                        return;
-                    }
-                    url += `/events/user/${userId}`;
-                    const userName = document.getElementById('user-name').value;
-                    streamName = `User: ${/^\d+$/.test(userName) ? userId : userName}`;
-                    break;
+                }
                 case 'pr':
-                    const prRepoId = document.getElementById('pr-repo-id').value;
-                    const prNumber = document.getElementById('pr-number').value;
-                    if (!prRepoId || !prNumber) {
-                        alert('Please enter both repository and PR number');
-                        applyBtn.disabled = false;
+                case 'issue': {
+                    const f = lookups[kind];
+                    const id = $(f.id).value;
+                    const n = $(kind + '-number').value.trim();
+                    if (!id || !n) {
+                        alert(`Please enter both repository and ${kind === 'pr' ? 'PR' : 'issue'} number`);
                         return;
                     }
-                    url += `/events/pr/${prRepoId}/${prNumber}`;
-                    const prRepoName = document.getElementById('pr-repo-name').value;
-                    streamName = `PR: ${/^\d+$/.test(prRepoName) ? prRepoId : prRepoName}#${prNumber}`;
+                    path = `/events/${kind}/${id}/${n}`;
+                    streamName = `${kind === 'pr' ? 'PR' : 'Issue'}: ${shown(f)}#${n}`;
                     break;
-                case 'issue':
-                    const issueRepoId = document.getElementById('issue-repo-id').value;
-                    const issueNumber = document.getElementById('issue-number').value;
-                    if (!issueRepoId || !issueNumber) {
-                        alert('Please enter both repository and issue number');
-                        applyBtn.disabled = false;
-                        return;
-                    }
-                    url += `/events/issue/${issueRepoId}/${issueNumber}`;
-                    const issueRepoName = document.getElementById('issue-repo-name').value;
-                    streamName = `Issue: ${/^\d+$/.test(issueRepoName) ? issueRepoId : issueRepoName}#${issueNumber}`;
-                    break;
+                }
             }
-            
-            // Add filters
             const params = new URLSearchParams();
-            const eventTypes = document.getElementById('event-type-filter').value;
-            if (eventTypes) params.append('type', eventTypes);
-            
-            const actions = document.getElementById('action-filter').value;
-            if (actions) params.append('action', actions);
-            
-            if (params.toString()) {
-                url += '?' + params.toString();
-            }
-            
-            // Update UI
-            currentSubscription = streamName;
-            document.getElementById('active-stream').textContent = streamName;
-            document.getElementById('subscription-info').textContent = `Subscribed to: ${streamName}`;
-            
-            // Connect to SSE
-            connectSSE(url);
-            
-            // Re-enable button after a short delay
-            setTimeout(() => {
-                applyBtn.disabled = false;
-            }, 1000);
+            const list = id => $(id).value.split(',').map(s => s.trim()).filter(Boolean).join(',');
+            const types = list('event-type-filter');
+            if (types) params.set('type', types);
+            const actions = list('action-filter');
+            if (actions) params.set('action', actions);
+            const query = params.toString();
+            $('active-stream').textContent = streamName;
+            $('subscription-info').textContent = `Subscribed to: ${streamName}`;
+            // a new subscription starts a new list; replayed events are not repeats
+            clearEvents();
+            connectSSE(SSE_BASE + path + (query ? '?' + query : ''));
         }
-        
+
         function connectSSE(url) {
+            if (eventSource) eventSource.close();
+            lastUrl = url;
+            const applyBtn = $('apply-btn');
+            applyBtn.disabled = true;
             updateConnectionStatus('connecting');
-            
             eventSource = new EventSource(url);
-            
-            eventSource.onopen = function() {
+            eventSource.onopen = () => {
+                applyBtn.disabled = false;
                 updateConnectionStatus('connected');
-                console.log('Connected to SSE server:', url);
                 fetchStats();
             };
-            
-            eventSource.onerror = function(error) {
+            // fires for network trouble and for the server's own `error` event
+            eventSource.onerror = () => {
+                applyBtn.disabled = false;
                 updateConnectionStatus('disconnected');
-                console.error('SSE error:', error);
             };
-            
-            // Listen for all messages
-            eventSource.onmessage = function(event) {
-                handleEvent(JSON.parse(event.data));
-            };
-            
-            // EventSource has no wildcard; every GitHub event type the server
-            // may name needs its own listener. Unknown ones fall to onmessage.
-            const eventTypes = [
-                'branch_protection_configuration', 'branch_protection_rule', 'check_run', 'check_suite',
-                'code_scanning_alert', 'commit_comment', 'create', 'custom_property', 'custom_property_values',
-                'delete', 'dependabot_alert', 'deploy_key', 'deployment', 'deployment_protection_rule',
-                'deployment_review', 'deployment_status', 'discussion', 'discussion_comment', 'fork',
-                'github_app_authorization', 'gollum', 'installation', 'installation_repositories',
-                'installation_target', 'issue_comment', 'issues', 'label', 'marketplace_purchase', 'member',
-                'membership', 'merge_group', 'meta', 'milestone', 'org_block', 'organization', 'package',
-                'page_build', 'personal_access_token_request', 'ping', 'project', 'project_card',
-                'project_column', 'projects_v2', 'projects_v2_item', 'projects_v2_status_update', 'public',
-                'pull_request', 'pull_request_review', 'pull_request_review_comment',
-                'pull_request_review_thread', 'push', 'registry_package', 'release', 'repository',
-                'repository_advisory', 'repository_dispatch', 'repository_import', 'repository_ruleset',
-                'repository_vulnerability_alert', 'secret_scanning_alert', 'secret_scanning_alert_location',
-                'secret_scanning_scan', 'security_advisory', 'security_and_analysis', 'sponsorship', 'star',
-                'status', 'sub_issues', 'team', 'team_add', 'watch', 'workflow_dispatch', 'workflow_job',
-                'workflow_run',
-            ];
-            
-            eventTypes.forEach(eventType => {
-                eventSource.addEventListener(eventType, function(event) {
-                    handleEvent(JSON.parse(event.data));
-                });
-            });
+            // GitHub events carry no event name, so one handler sees every type
+            eventSource.onmessage = e => handleEvent(JSON.parse(e.data));
         }
-        
-        function handleEvent(githubEvent) {
-            // Update stats
+
+        function handleEvent(event) {
+            if (seen.has(event.id)) return;
+            seen.add(event.id);
+            if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);
             stats.total++;
-            stats.timestamps.push(Date.now());
-            
-            // Remove empty state if exists
+            // replayed events count toward the total, not toward the rate
+            stats.timestamps.push(Date.parse(event.received_at) || Date.now());
             const emptyState = document.querySelector('.empty-state');
-            if (emptyState) {
-                emptyState.remove();
-            }
-            
-            // Add event to list
-            addEventToList(githubEvent);
+            if (emptyState) emptyState.remove();
+            addEventToList(event);
             updateStats();
         }
-        
+
         function addEventToList(event) {
-            const eventsList = document.getElementById('events-list');
+            const eventsList = $('events-list');
             const eventItem = document.createElement('div');
             eventItem.className = 'event-item';
-            
             const timestamp = new Date(event.received_at).toLocaleTimeString();
-            
-            // Build event description
-            let description = '';
-            if (event.action) {
-                description = `Action: ${event.action}`;
-            }
-            
-            // Parse payload for additional details
+            let description = event.action ? `Action: ${event.action}` : '';
             let prState = '';
             let issueState = '';
             try {
-                if (event.payload) {
-                    const payload = typeof event.payload === 'string' ? 
-                        JSON.parse(event.payload) : event.payload;
-                    
-                    if (payload.pull_request) {
-                        prState = payload.pull_request.merged ? 'merged' : payload.pull_request.state;
-                        description = `PR #${payload.pull_request.number}: ${payload.pull_request.title}`;
-                    } else if (payload.issue) {
-                        issueState = payload.issue.state;
-                        description = `Issue #${payload.issue.number}: ${payload.issue.title}`;
-                    } else if (payload.ref && event.event === 'push') {
-                        const branch = payload.ref.replace('refs/heads/', '');
-                        const commitCount = payload.commits ? payload.commits.length : 0;
-                        description = `${commitCount} commit(s) to ${branch}`;
-                    } else if (payload.release) {
-                        description = `Release ${payload.release.tag_name}: ${payload.release.name}`;
-                    } else if (payload.workflow_run) {
-                        description = `Workflow "${payload.workflow_run.name}" ${payload.workflow_run.conclusion || 'running'}`;
-                    }
+                const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
+                if (payload && payload.pull_request) {
+                    prState = payload.pull_request.merged ? 'merged' : payload.pull_request.state;
+                    description = `PR #${payload.pull_request.number}: ${payload.pull_request.title}`;
+                } else if (payload && payload.issue) {
+                    issueState = payload.issue.state;
+                    description = `Issue #${payload.issue.number}: ${payload.issue.title}`;
+                } else if (payload && payload.ref && event.event === 'push') {
+                    const branch = payload.ref.replace('refs/heads/', '');
+                    // the webhook payload lists at most 20 commits and no count; the Events API has size
+                    const n = payload.size ?? (payload.commits ? payload.commits.length : 0);
+                    const count = payload.size == null && n === 20 ? '20+' : n;
+                    description = `${count} commit(s) to ${branch}`;
+                } else if (payload && payload.release) {
+                    description = `Release ${payload.release.tag_name}: ${payload.release.name}`;
+                } else if (payload && payload.workflow_run) {
+                    description = `Workflow "${payload.workflow_run.name}" ${payload.workflow_run.conclusion || 'running'}`;
                 }
             } catch (e) {
                 console.error('Error parsing payload:', e);
             }
-            
             eventItem.innerHTML = `
                 <div class="event-header-row">
                     <div class="event-badges">
@@ -1006,73 +827,51 @@
                     </div>
                 </div>
             `;
-            
-            // Add to top of list
             eventsList.insertBefore(eventItem, eventsList.firstChild);
-            
-            // Limit to 100 events
             while (eventsList.children.length > 100) {
                 eventsList.removeChild(eventsList.lastChild);
             }
         }
-        
+
         function updateConnectionStatus(status) {
-            const statusElement = document.getElementById('connection-status');
-            statusElement.className = `connection-status ${status}`;
-            statusElement.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+            const el = $('connection-status');
+            el.className = `connection-status ${status}`;
+            el.textContent = status.charAt(0).toUpperCase() + status.slice(1);
         }
-        
+
         function updateStats() {
-            document.getElementById('total-events').textContent = stats.total;
-            
-            // Calculate events per minute
-            const now = Date.now();
-            const oneMinuteAgo = now - 60000;
-            const recentEvents = stats.timestamps.filter(ts => ts > oneMinuteAgo);
-            stats.eventsPerMinute = recentEvents.length;
-            document.getElementById('events-per-minute').textContent = stats.eventsPerMinute;
+            const oneMinuteAgo = Date.now() - 60000;
+            stats.timestamps = stats.timestamps.filter(ts => ts > oneMinuteAgo);
+            $('total-events').textContent = stats.total;
+            $('events-per-minute').textContent = stats.timestamps.length;
         }
-        
-        function updateStatsEverySecond() {
-            setInterval(() => {
-                updateStats();
-            }, 1000);
-        }
-        
+
         function fetchStats() {
             fetch(SSE_BASE + '/stats')
                 .then(response => response.json())
-                .then(data => {
-                    document.getElementById('connected-clients').textContent = 
-                        data.total_clients ?? '-';
-                })
-                .catch(error => {
-                    console.error('Error fetching stats:', error);
-                });
+                .then(data => { $('connected-clients').textContent = data.total_clients ?? '-'; })
+                .catch(error => console.error('Error fetching stats:', error));
         }
-        
+
         function clearEvents() {
-            const eventsList = document.getElementById('events-list');
-            eventsList.innerHTML = `
+            $('events-list').innerHTML = `
                 <div class="empty-state">
-                    <h3>Events cleared</h3>
-                    <p>New events will appear here as they are received.</p>
+                    <h3>Waiting for events</h3>
+                    <p>Events will appear here as they are received.</p>
                 </div>
             `;
             stats.total = 0;
             stats.timestamps = [];
+            seen.clear();
             updateStats();
         }
-        
-        // Reconnect on window focus
-        window.addEventListener('focus', function() {
-            if (eventSource && eventSource.readyState === EventSource.CLOSED) {
-                applySubscription();
+
+        // a stream the browser gave up on comes back when the tab does
+        window.addEventListener('focus', () => {
+            if (eventSource && eventSource.readyState === EventSource.CLOSED && lastUrl) {
+                connectSSE(lastUrl);
             }
         });
-        
-        // Periodic stats update
-        setInterval(fetchStats, 5000);
     </script>
 </body>
 </html>
