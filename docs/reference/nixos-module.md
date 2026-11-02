@@ -41,7 +41,7 @@ protection, `AF_INET`, `AF_INET6` and `AF_UNIX` only. All set
 `nats.enable`, `nats.service`.
 
 With `domain` set, nginx terminates TLS, proxies `/webhook` and the SSE
-routes, accepts bodies up to 25 MB, and limits each client address to
+routes, accepts bodies up to 25 MB on `/webhook`, and limits each client address to
 20 open streams and 10 requests per second on the SSE routes. `/webhook`
 is not rate limited: GitHub does not retry a refused delivery.
 

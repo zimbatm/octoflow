@@ -233,8 +233,6 @@ in
       enable = true;
       recommendedProxySettings = true;
       recommendedTlsSettings = true;
-      # GitHub delivers up to 25 MB; the NixOS default of 10m would 413 them
-      clientMaxBodySize = "25m";
       # one browser needs a handful of streams; a flood must not take the
       # SSE_MAX_CLIENTS slots of everyone else. /webhook is not limited:
       # GitHub does not retry a refused delivery.
@@ -245,7 +243,12 @@ in
       virtualHosts.${cfg.domain} = {
         enableACME = true;
         forceSSL = true;
-        locations."= /webhook".proxyPass = "http://${cfg.webhook.listen}";
+        locations."= /webhook" = {
+          proxyPass = "http://${cfg.webhook.listen}";
+          # GitHub delivers up to 25 MB; the NixOS default of 10m would 413 them.
+          # Only here: the host may serve other sites with the default.
+          extraConfig = "client_max_body_size 25m;";
+        };
         locations."/" = {
           proxyPass = "http://${cfg.sse.listen}";
           # SSE streams stay open; nginx must not buffer or time them out.
