@@ -11,7 +11,7 @@
 | `package` | package | the flake's package | |
 | `natsUrl` | string | `nats://127.0.0.1:4222` | `NATS_URL` of every unit |
 | `nats.enable` | bool | `true` | run `services.nats` with JetStream on 127.0.0.1 and `max_payload` 32 MiB |
-| `domain` | string or null | `null` | when set, nginx serves it with ACME: `= /webhook` to the receiver, `/` to the SSE server with buffering off and a 1 h read timeout |
+| `domain` | string or null | `null` | when set, nginx serves it with ACME: the dashboard at `/`, `= /webhook` to the receiver, everything else to the SSE server with buffering off and a 1 h read timeout |
 | `metricsListen` | attrs of string | `webhook = "127.0.0.1:9180"`, `dispatcher = ...9181`, `sse = ...9182`, `s3 = ...9183`, `public-ingest = ...9184` | `METRICS_LISTEN_ADDR` per service; `""` disables one |
 | `webhook.listen` | string | `127.0.0.1:8180` | `WEBHOOK_LISTEN_ADDR` |
 | `webhook.environmentFile` | path or null | `null` | systemd `EnvironmentFile` with `WEBHOOK_SECRET=`; without a secret the unit fails unless the file sets `WEBHOOK_ALLOW_UNSIGNED=true` |
@@ -45,9 +45,9 @@ routes, accepts bodies up to 25 MB on `/webhook`, and limits each client address
 20 open streams and 10 requests per second on the SSE routes. `/webhook`
 is not rate limited: GitHub does not retry a refused delivery.
 
-The dashboard is not deployed by the module; serve `web/index.html`
-from the package's `share/octoflow/web` with any static server if you
-want it, and open it with `?sse=https://<domain>`.
+The dashboard is served at `/` from the package's `share/octoflow/web`; it reads
+the SSE routes from its own origin. Any other static server can serve the
+same file, opened with `?sse=https://<domain>`.
 
 ## Test
 

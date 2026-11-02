@@ -112,7 +112,7 @@ in
       type = lib.types.nullOr lib.types.str;
       default = null;
       example = "events.nixpkgs.org";
-      description = "When set, nginx serves this name with ACME: /webhook goes to the receiver, the rest to the SSE server.";
+      description = "When set, nginx serves this name with ACME: the dashboard at /, /webhook to the receiver, the rest to the SSE server.";
     };
 
     webhook = {
@@ -248,6 +248,11 @@ in
           # GitHub delivers up to 25 MB; the NixOS default of 10m would 413 them.
           # Only here: the host may serve other sites with the default.
           extraConfig = "client_max_body_size 25m;";
+        };
+        # the dashboard page; it reads the SSE routes from its own origin
+        locations."= /" = {
+          root = "${cfg.package}/share/octoflow/web";
+          tryFiles = "/index.html =404";
         };
         locations."/" = {
           proxyPass = "http://${cfg.sse.listen}";
