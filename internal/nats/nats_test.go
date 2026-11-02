@@ -229,3 +229,18 @@ func TestAckOrNak(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+func TestConnectGivesUpAfterTheTimeout(t *testing.T) {
+	old := connectTimeout
+	connectTimeout = 1500 * time.Millisecond
+	t.Cleanup(func() { connectTimeout = old })
+	cfg := &config.NATSConfig{Servers: []string{"nats://127.0.0.1:1"}, ConnectionTimeout: 200 * time.Millisecond}
+	start := time.Now()
+	_, err := Connect(cfg)
+	if err == nil {
+		t.Fatal("connected to a closed port")
+	}
+	if d := time.Since(start); d < time.Second || d > 5*time.Second {
+		t.Errorf("gave up after %s, want about the 1.5 s timeout", d)
+	}
+}

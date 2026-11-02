@@ -1,15 +1,22 @@
 package nats
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/nats-io/nats.go"
 	"github.com/zimbatm/octoflow/internal/config"
 )
 
-// Connect opens a connection with the credentials in cfg.
+// connectTimeout bounds the wait for a server that is still starting: the
+// units start together after a switch and nats is ready a second later.
+var connectTimeout = 30 * time.Second
+
+// Connect opens a connection with the credentials in cfg, retrying for
+// connectTimeout while the server refuses.
 func Connect(cfg *config.NATSConfig) (*nats.Conn, error) {
 	opts := []nats.Option{
 		nats.MaxReconnects(cfg.MaxReconnects),
@@ -39,7 +46,16 @@ func Connect(cfg *config.NATSConfig) (*nats.Conn, error) {
 		opts = append(opts, opt)
 	}
 
-	nc, err := nats.Connect(strings.Join(cfg.Servers, ","), opts...)
+	var nc *nats.Conn
+	var err error
+	for deadline := time.Now().Add(connectTimeout); ; {
+		nc, err = nats.Connect(strings.Join(cfg.Servers, ","), opts...)
+		if err == nil || !errors.Is(err, nats.ErrNoServers) || time.Now().After(deadline) {
+			break
+		}
+		slog.Info("NATS not reachable yet; retrying", "error", err)
+		time.Sleep(time.Second)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to NATS: %w", err)
 	}
