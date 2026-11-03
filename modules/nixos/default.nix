@@ -8,6 +8,9 @@
 let
   cfg = config.services.octoflow;
 
+  natsMetrics = lib.splitString ":" (cfg.metricsListen.nats or "");
+  natsExporter = cfg.nats.enable && cfg.metricsListen.nats or "" != "";
+
   common = {
     NATS_URL = cfg.natsUrl;
     NATS_STREAM_REPLICAS = "1";
@@ -104,8 +107,9 @@ in
         sse = "127.0.0.1:9182";
         s3 = "127.0.0.1:9183";
         public-ingest = "127.0.0.1:9184";
+        nats = "127.0.0.1:9185";
       };
-      description = "Prometheus /metrics address per service; an empty string disables it.";
+      description = "Prometheus /metrics address per service; an empty string disables it. `nats` is prometheus-nats-exporter in front of the local server's monitoring port.";
     };
 
     domain = lib.mkOption {
@@ -186,6 +190,20 @@ in
       settings.host = "127.0.0.1";
       # the receiver accepts 25 MB deliveries, GitHub's limit; the stored event adds an envelope.
       settings.max_payload = 32 * 1024 * 1024;
+      settings.http = lib.mkIf natsExporter "127.0.0.1:8222";
+    };
+
+    services.prometheus.exporters.nats = lib.mkIf natsExporter {
+      enable = true;
+      listenAddress = lib.head natsMetrics;
+      port = lib.toInt (lib.last natsMetrics);
+      url = "http://127.0.0.1:8222";
+      extraFlags = [
+        "-varz"
+        "-connz"
+        "-healthz"
+        "-jsz=all"
+      ];
     };
 
     systemd.services = {

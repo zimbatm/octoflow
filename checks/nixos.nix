@@ -98,6 +98,11 @@ pkgs.testers.runNixOSTest {
       machine.succeed("curl -sf http://127.0.0.1:9182/metrics | grep -c 'octoflow_sse_events_sent_total{route=\"org\"} 1'")
       machine.succeed("curl -sf http://127.0.0.1:9183/healthz")
       machine.wait_until_succeeds(
+        "curl -sf http://127.0.0.1:9185/metrics | grep -c '^jetstream_stream_total_messages{.*stream_name=\"GITHUB_EVENTS_RAW\".*} [1-9]'",
+        timeout=30,
+      )
+      machine.succeed("curl -sf http://127.0.0.1:9185/metrics | grep -c '^gnatsd_varz_connections{.*} [1-9]'")
+      machine.wait_until_succeeds(
         "curl -sf http://127.0.0.1:9181/metrics | grep -c '^octoflow_stream_messages [1-9]'",
         timeout=60,
       )

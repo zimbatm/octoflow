@@ -12,7 +12,7 @@
 | `natsUrl` | string | `nats://127.0.0.1:4222` | `NATS_URL` of every unit |
 | `nats.enable` | bool | `true` | run `services.nats` with JetStream on 127.0.0.1 and `max_payload` 32 MiB |
 | `domain` | string or null | `null` | when set, nginx serves it with ACME: the dashboard at `/`, `= /webhook` to the receiver, everything else to the SSE server with buffering off and a 1 h read timeout |
-| `metricsListen` | attrs of string | `webhook = "127.0.0.1:9180"`, `dispatcher = ...9181`, `sse = ...9182`, `s3 = ...9183`, `public-ingest = ...9184` | `METRICS_LISTEN_ADDR` per service; `""` disables one |
+| `metricsListen` | attrs of string | `webhook = "127.0.0.1:9180"`, `dispatcher = ...9181`, `sse = ...9182`, `s3 = ...9183`, `public-ingest = ...9184`, `nats = ...9185` | `METRICS_LISTEN_ADDR` per service; `""` disables one. `nats` runs `prometheus-nats-exporter` against the local server, whose monitoring port is then 127.0.0.1:8222 |
 | `webhook.listen` | string | `127.0.0.1:8180` | `WEBHOOK_LISTEN_ADDR` |
 | `webhook.environmentFile` | path or null | `null` | systemd `EnvironmentFile` with `WEBHOOK_SECRET=`; without a secret the unit fails unless the file sets `WEBHOOK_ALLOW_UNSIGNED=true` |
 | `sse.listen` | string | `127.0.0.1:8181` | `SSE_LISTEN_ADDR` |

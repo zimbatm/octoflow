@@ -64,7 +64,9 @@ curl -s http://127.0.0.1:9181/metrics | grep octoflow_stream_messages
 ```
 
 Each unit exposes Prometheus metrics on its own loopback port (9180 to
-9184, see `services.octoflow.metricsListen`). Scrape them with your
+9184, see `services.octoflow.metricsListen`), and `prometheus-nats-exporter`
+exposes the NATS server itself on 9185: connections, slow consumers,
+memory, and JetStream storage against its limit. Scrape them with your
 Prometheus or `services.prometheus.scrapeConfigs`.
 
 ## 6. Run the VM test

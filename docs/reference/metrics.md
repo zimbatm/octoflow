@@ -77,3 +77,18 @@ SSE consumers are not in the `consumer` series: they come and go.
 
 The Go runtime and process collectors of the Prometheus client are
 exposed as well.
+
+## NATS server
+
+Not from octoflow: the NixOS module runs `prometheus-nats-exporter` on
+`metricsListen.nats` (127.0.0.1:9185) against the server's monitoring
+port. The series that matter, all labelled `server_id`:
+
+| Series | Meaning |
+|---|---|
+| `gnatsd_varz_connections` | open client connections, one per octoflow unit |
+| `gnatsd_varz_slow_consumers` | clients the server disconnected because they could not keep up |
+| `gnatsd_varz_mem`, `gnatsd_varz_cpu` | resident memory and CPU percent of nats-server |
+| `gnatsd_varz_in_msgs`, `gnatsd_varz_out_msgs` | messages in and out, counters |
+| `jetstream_server_total_message_bytes` | bytes JetStream stores, against `jetstream_server_max_storage` |
+| `jetstream_stream_total_messages` | per stream, labelled `stream_name` |
