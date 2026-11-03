@@ -145,12 +145,13 @@ in
       endpoint = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = null;
-        example = "https://<account>.r2.cloudflarestorage.com";
+        example = "https://fsn1.your-objectstorage.com";
       };
       region = lib.mkOption {
         type = lib.types.str;
         default = "auto";
-        description = "R2 expects auto.";
+        example = "fsn1";
+        description = "Hetzner Object Storage expects its location, R2 auto.";
       };
       keyPrefix = lib.mkOption {
         type = lib.types.str;

@@ -53,7 +53,7 @@ connection timeout.
 | Variable | Default | Meaning |
 |---|---|---|
 | `S3_BUCKET` | none | Required by the s3 service; `octoflow all` skips the service without it. |
-| `AWS_REGION` | `us-east-1` | R2 wants `auto`. |
+| `AWS_REGION` | `us-east-1` | Hetzner Object Storage wants its location such as `fsn1`, R2 `auto`. |
 | `S3_ENDPOINT` | AWS for the region | `http://` or `https://` URL of an S3-compatible store. |
 | `S3_KEY_PREFIX` | `github-events` | First path element of every object key. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | none | Static credentials. When the key id is unset, the AWS chain is tried: environment, shared credentials file, instance role. |

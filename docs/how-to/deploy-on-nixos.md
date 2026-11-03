@@ -33,7 +33,8 @@ services.octoflow = {
   webhook.environmentFile = config.sops.secrets.octoflow-webhook.path;
   s3 = {
     bucket = "octoflow";
-    endpoint = "https://<account>.r2.cloudflarestorage.com";
+    endpoint = "https://fsn1.your-objectstorage.com";
+    region = "fsn1";
     environmentFile = config.sops.secrets.octoflow-s3.path;
   };
   publicIngest = {

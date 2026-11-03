@@ -18,7 +18,7 @@
 | `sse.listen` | string | `127.0.0.1:8181` | `SSE_LISTEN_ADDR` |
 | `s3.bucket` | string or null | `null` | `S3_BUCKET`; the s3 unit exists only when set |
 | `s3.endpoint` | string or null | `null` | `S3_ENDPOINT` |
-| `s3.region` | string | `auto` | `AWS_REGION`; R2 expects `auto` |
+| `s3.region` | string | `auto` | `AWS_REGION`; Hetzner Object Storage expects its location such as `fsn1`, R2 `auto` |
 | `s3.keyPrefix` | string | `github-events` | `S3_KEY_PREFIX` |
 | `s3.environmentFile` | path or null | `null` | `AWS_ACCESS_KEY_ID=` and `AWS_SECRET_ACCESS_KEY=` |
 | `publicIngest.repos` | list of string | `[]` | `PUBLIC_REPOS`; the public-ingest unit exists only when non-empty |
