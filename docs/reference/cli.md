@@ -14,6 +14,7 @@ One binary; the argument names the service.
 | `octoflow public-ingest` | the Events API and GH Archive reader; needs `PUBLIC_REPOS` |
 | `octoflow all` | every service in one process on one NATS connection; `s3` only with `S3_BUCKET`, `public-ingest` only with `PUBLIC_REPOS` |
 | `octoflow restore --from DATE [--to DATE] [--event a,b] [--repo ID] [--org ID] [--dry-run] [--force]` | publishes archived events from S3 back into the stream; dates are UTC and inclusive, matched against `received_at`; skips events received since the oldest one the stream still holds unless `--force`; needs the s3 settings and, unless `--dry-run`, NATS |
+| `octoflow wipe [--id a,b] [--event a,b] [--repo ID] [--org ID] [--user ID] [--pr N] [--issue N] [--from DATE [--to DATE]] [--dry-run]` | securely deletes the selected events and their fan-out copies from the stream, and rewrites the archive files that hold them when `S3_BUCKET` is set; every selector given must match and one is required; needs NATS |
 | `octoflow version` | prints the build version |
 
 Exit status: 2 for a usage error, 1 when a service fails or cannot

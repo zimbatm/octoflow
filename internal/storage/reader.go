@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,10 +15,12 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// ObjectStore is the part of S3 that a restore reads.
+// ObjectStore is the part of S3 that a restore reads and a wipe rewrites.
 type ObjectStore interface {
 	List(ctx context.Context, prefix string) ([]string, error)
 	Get(ctx context.Context, key string) ([]byte, error)
+	Put(ctx context.Context, key string, data []byte) error
+	Delete(ctx context.Context, key string) error
 }
 
 // NewObjectStore reads the bucket in cfg; see newClient for credentials.
@@ -56,6 +59,22 @@ func (s *minioStore) Get(ctx context.Context, key string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read %s: %w", key, err)
 	}
 	return data, nil
+}
+
+func (s *minioStore) Put(ctx context.Context, key string, data []byte) error {
+	_, err := s.client.PutObject(ctx, s.bucket, key, bytes.NewReader(data), int64(len(data)),
+		minio.PutObjectOptions{ContentType: "application/octet-stream"})
+	if err != nil {
+		return fmt.Errorf("failed to put %s: %w", key, err)
+	}
+	return nil
+}
+
+func (s *minioStore) Delete(ctx context.Context, key string) error {
+	if err := s.client.RemoveObject(ctx, s.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("failed to delete %s: %w", key, err)
+	}
+	return nil
 }
 
 // DecodeParquet returns the events of one archive file, in file order.

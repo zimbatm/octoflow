@@ -71,6 +71,8 @@ func main() {
 		return
 	case "restore":
 		os.Exit(runRestore(os.Args[2:]))
+	case "wipe":
+		os.Exit(runWipe(os.Args[2:]))
 	}
 	if len(os.Args) != 2 {
 		usage()
@@ -155,9 +157,11 @@ func main() {
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: octoflow webhook|dispatcher|s3|sse|dashboard|public-ingest|all")
 	fmt.Fprintln(os.Stderr, "       octoflow restore --from YYYY-MM-DD [--to YYYY-MM-DD] [--event a,b] [--repo ID] [--org ID] [--dry-run] [--force]")
+	fmt.Fprintln(os.Stderr, "       octoflow wipe [--id a,b] [--event a,b] [--repo ID] [--org ID] [--user ID] [--pr N] [--issue N] [--from YYYY-MM-DD [--to YYYY-MM-DD]] [--dry-run]")
 	fmt.Fprintln(os.Stderr, "       octoflow version")
 	fmt.Fprintln(os.Stderr, "  all runs every service in this process; s3 only with S3_BUCKET, public-ingest only with PUBLIC_REPOS")
 	fmt.Fprintln(os.Stderr, "  restore publishes archived events from S3 back into the stream")
+	fmt.Fprintln(os.Stderr, "  wipe deletes the selected events from the stream and, with S3_BUCKET, from the archive")
 }
 
 func fatal(msg string, err error) {

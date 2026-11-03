@@ -214,6 +214,12 @@ func (w *S3Writer) upload() error {
 }
 
 func (w *S3Writer) encodeParquet(eventList []*events.GitHubEvent) ([]byte, error) {
+	return EncodeParquet(w.config, eventList)
+}
+
+// EncodeParquet writes events as one archive file, with the compression
+// and row group size of cfg.
+func EncodeParquet(cfg *config.S3Config, eventList []*events.GitHubEvent) ([]byte, error) {
 	fw := buffer.NewBufferFile()
 
 	pw, err := writer.NewParquetWriter(fw, new(parquetRow), 4)
@@ -221,7 +227,7 @@ func (w *S3Writer) encodeParquet(eventList []*events.GitHubEvent) ([]byte, error
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
 
-	switch w.config.CompressionType {
+	switch cfg.CompressionType {
 	case "gzip":
 		pw.CompressionType = parquet.CompressionCodec_GZIP
 	case "lz4":
@@ -229,7 +235,7 @@ func (w *S3Writer) encodeParquet(eventList []*events.GitHubEvent) ([]byte, error
 	default:
 		pw.CompressionType = parquet.CompressionCodec_SNAPPY
 	}
-	pw.RowGroupSize = int64(w.config.RowGroupSize)
+	pw.RowGroupSize = int64(cfg.RowGroupSize)
 
 	for _, event := range eventList {
 		if err := pw.Write(toRow(event)); err != nil {

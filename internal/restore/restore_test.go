@@ -42,6 +42,16 @@ func (s *fakeStore) Get(_ context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
+func (s *fakeStore) Put(_ context.Context, key string, data []byte) error {
+	s.files[key] = data
+	return nil
+}
+
+func (s *fakeStore) Delete(_ context.Context, key string) error {
+	delete(s.files, key)
+	return nil
+}
+
 // archive encodes events into one file as the s3 service would at uploadedAt.
 func (s *fakeStore) archive(t *testing.T, uploadedAt time.Time, evs ...*events.GitHubEvent) {
 	t.Helper()

@@ -130,6 +130,20 @@ pkgs.testers.runNixOSTest {
         ).strip()
         assert out == "1", f"{route} after restore: {out} events"
 
+    with subtest("a wipe removes the event from the stream and the archive"):
+      s3env = (
+        "S3_BUCKET=octoflow S3_ENDPOINT=http://127.0.0.1:9000 AWS_REGION=us-east-1 "
+        "AWS_ACCESS_KEY_ID=testkey AWS_SECRET_ACCESS_KEY=testsecret "
+      )
+      out = machine.succeed(s3env + "octoflow wipe --repo 111 --pr 7 --dry-run")
+      assert "events=1 deleted=0" in out, out
+      assert "wipe archive: files=1 rows=1 matched=1 rewritten=0 removed=0" in out, out
+      out = machine.succeed(s3env + "octoflow wipe --repo 111 --pr 7")
+      assert "events=1" in out and "deleted=0" not in out and "removed=1" in out, out
+      machine.succeed("nats --server nats://127.0.0.1:4222 stream info GITHUB_EVENTS_RAW --json | jq -e '.state.messages == 0'")
+      out = machine.succeed(s3env + "octoflow restore --from $(date -u +%F) --dry-run")
+      assert "files=0 rows=0" in out, out
+
     with subtest("a 2 MiB delivery, above the nats-server default max_payload, is stored"):
       machine.succeed(
         "head -c 2097152 /dev/zero | tr '\\0' x > /tmp/pad.txt && "

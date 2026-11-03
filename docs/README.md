@@ -18,6 +18,7 @@ pages, each with one job.
 - [Ingest repositories without a webhook](how-to/ingest-public-repositories.md)
 - [Query the Parquet archive](how-to/query-the-parquet-archive.md)
 - [Restore events from the archive](how-to/restore-from-the-archive.md)
+- [Wipe events](how-to/wipe-events.md)
 - [Inspect the stream with the NATS CLI](how-to/inspect-the-stream.md)
 - [Troubleshoot](how-to/troubleshoot.md)
 

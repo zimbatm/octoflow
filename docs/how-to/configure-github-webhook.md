@@ -37,10 +37,21 @@ Organization settings, Webhooks, Add webhook:
 | Content type | `application/json` (the receiver rejects form encoding) |
 | Secret | the value from step 1 |
 | SSL verification | enabled |
-| Events | "Send me everything", or the types you need |
+| Events | the types you need; see below before choosing "Send me everything" |
 
 GitHub sends a `ping` at once. The receiver answers 200 without storing
 it; the delivery shows a green check in "Recent Deliveries".
+
+"Send me everything" includes event types whose payloads are not public
+even on a public repository: `repository_advisory`,
+`secret_scanning_alert` and its `_location` and `_scan` events,
+`code_scanning_alert`, `dependabot_alert`,
+`repository_vulnerability_alert`, `security_and_analysis`, the
+`exemption_request_*` and `dismissal_request_*` events, `deploy_key`
+and `custom_property_values`. The stream and the archive expose
+everything they hold, so leave those unchecked unless every reader is
+trusted with them. An event that slipped through is removed with
+[`octoflow wipe`](wipe-events.md).
 
 ## 4. Restrict the organizations, optionally
 

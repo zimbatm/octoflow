@@ -45,6 +45,9 @@ run `nix build`, copy the hash it prints).
    repositories without a webhook (`internal/publicingest`, best-effort).
 7. `restore --from DATE`: publishes archived events from S3 back into the
    stream (`internal/restore`); not a service, exits when done.
+8. `wipe --id ...`: securely deletes selected events and their copies
+   from the stream and rewrites the archive files that hold them
+   (`internal/wipe`); not a service.
 
 The webhook, sse and dashboard routes share one server on
 `HTTP_LISTEN_ADDR` (:8080) with `GET /health`; `*_LISTEN_ADDR` moves a
@@ -76,6 +79,7 @@ whole stream sees each event once per copy; consume the primary subjects
 - `internal/webhook`: HTTP server and GitHub webhook handler
 - `internal/storage`: Parquet batching behind an Uploader interface, and the reader
 - `internal/restore`: archive to stream
+- `internal/wipe`: selected events out of the stream and the archive
 - `internal/sse`: SSE handler, routes and writer
 - `internal/ghevents`: Events API client, GH Archive reader, conversion
 - `internal/publicingest`: polling loops and progress for public-ingest
