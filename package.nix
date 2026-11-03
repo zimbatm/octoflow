@@ -17,7 +17,7 @@ pkgs.buildGoModule {
       ./web
     ];
   };
-  vendorHash = "sha256-/t+5DGpX7YeCuNvuF+E1hRNvqtW/jHkgb/MZBDrAg24=";
+  vendorHash = "sha256-Lm40wxm1VUCfYuo4ByvTv/CK3OyI6wbYf2MYNSyujLU=";
   subPackages = [ "cmd/octoflow" ];
   env.CGO_ENABLED = 0;
   # subPackages limits the default checkPhase to the binary; test everything.

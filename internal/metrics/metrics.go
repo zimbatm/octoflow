@@ -98,4 +98,24 @@ var (
 		Name: "octoflow_stream_consumers",
 		Help: "Consumers on the events stream, including SSE clients",
 	})
+
+	StreamFirstEvent = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "octoflow_stream_first_event_timestamp_seconds",
+		Help: "Store time of the oldest message still in the stream",
+	})
+
+	StreamLastEvent = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "octoflow_stream_last_event_timestamp_seconds",
+		Help: "Store time of the newest message in the stream",
+	})
+
+	ConsumerPending = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "octoflow_consumer_pending",
+		Help: "Messages not yet delivered to a durable consumer",
+	}, []string{"consumer"})
+
+	ConsumerAckPending = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "octoflow_consumer_ack_pending",
+		Help: "Messages delivered to a durable consumer and not yet acked",
+	}, []string{"consumer"})
 )

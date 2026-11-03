@@ -63,11 +63,17 @@ series per organization that delivers.
 Refreshed every 30 seconds by any process with a NATS connection and a
 metrics listener.
 
-| Series | Meaning |
-|---|---|
-| `octoflow_stream_messages` | messages in the stream, primary and copies |
-| `octoflow_stream_bytes` | bytes stored |
-| `octoflow_stream_consumers` | consumers, SSE connections included |
+| Series | Labels | Meaning |
+|---|---|---|
+| `octoflow_stream_messages` | | messages in the stream, primary and copies |
+| `octoflow_stream_bytes` | | bytes stored |
+| `octoflow_stream_consumers` | | consumers, SSE connections included |
+| `octoflow_stream_first_event_timestamp_seconds` | | store time of the oldest message left, so the replay depth |
+| `octoflow_stream_last_event_timestamp_seconds` | | store time of the newest message; its age says how long no event came in |
+| `octoflow_consumer_pending` | `consumer` | messages not yet delivered to `event-dispatcher` or `s3-worker`; a growing value is a backlog |
+| `octoflow_consumer_ack_pending` | `consumer` | delivered and not yet acked; `s3-worker` holds a batch here until it is uploaded |
+
+SSE consumers are not in the `consumer` series: they come and go.
 
 The Go runtime and process collectors of the Prometheus client are
 exposed as well.

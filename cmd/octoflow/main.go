@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -225,16 +226,12 @@ func serveMetrics(ctx context.Context, addr string) error {
 	return serveHTTP(ctx, &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second})
 }
 
-// watchStream refreshes the stream gauges every 30 seconds.
+// watchStream refreshes the stream and consumer gauges every 30 seconds.
 func watchStream(ctx context.Context, js nats.JetStreamContext, stream string) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
-		if info, err := js.StreamInfo(stream); err == nil {
-			metrics.StreamMessages.Set(float64(info.State.Msgs))
-			metrics.StreamBytes.Set(float64(info.State.Bytes))
-			metrics.StreamConsumers.Set(float64(info.State.Consumers))
-		} else if ctx.Err() == nil {
+		if err := streamGauges(js, stream); err != nil && ctx.Err() == nil {
 			slog.Warn("Failed to read stream info", "stream", stream, "error", err)
 		}
 		select {
@@ -243,6 +240,30 @@ func watchStream(ctx context.Context, js nats.JetStreamContext, stream string) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func streamGauges(js nats.JetStreamContext, stream string) error {
+	info, err := js.StreamInfo(stream)
+	if err != nil {
+		return err
+	}
+	metrics.StreamMessages.Set(float64(info.State.Msgs))
+	metrics.StreamBytes.Set(float64(info.State.Bytes))
+	metrics.StreamConsumers.Set(float64(info.State.Consumers))
+	if info.State.Msgs > 0 {
+		metrics.StreamFirstEvent.Set(float64(info.State.FirstTime.Unix()))
+		metrics.StreamLastEvent.Set(float64(info.State.LastTime.Unix()))
+	}
+	// SSE consumers come and go by the thousand; the durable ones are the
+	// pipeline, and their backlog is what an alert watches.
+	for ci := range js.Consumers(stream) {
+		if strings.HasPrefix(ci.Name, "sse-") {
+			continue
+		}
+		metrics.ConsumerPending.WithLabelValues(ci.Name).Set(float64(ci.NumPending))
+		metrics.ConsumerAckPending.WithLabelValues(ci.Name).Set(float64(ci.NumAckPending))
+	}
+	return nil
 }
 
 // serveHTTP runs srv until ctx ends, then gives in-flight requests 30 seconds.

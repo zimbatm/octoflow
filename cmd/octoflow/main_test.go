@@ -6,8 +6,14 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nats-io/nats.go"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/zimbatm/octoflow/internal/config"
+	"github.com/zimbatm/octoflow/internal/metrics"
+	"github.com/zimbatm/octoflow/internal/natstest"
 )
 
 func joined(ss []service) string { return strings.Join(names(ss), " ") }
@@ -97,5 +103,39 @@ func TestWebhookRefusesToStartWithoutASecret(t *testing.T) {
 	cfg.Webhook.ListenAddr = ":1"
 	if _, err := httpServers(mustPick(t, "webhook", cfg), cfg, nil); err == nil {
 		t.Error("no secret and no WEBHOOK_ALLOW_UNSIGNED must be an error")
+	}
+}
+
+func TestStreamGauges(t *testing.T) {
+	_, js := natstest.Start(t)
+	if _, err := js.AddStream(&nats.StreamConfig{Name: "S", Subjects: []string{"s.>"}}); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		if _, err := js.Publish("s.a", []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"event-dispatcher", "sse-1-1"} {
+		if _, err := js.AddConsumer("S", &nats.ConsumerConfig{Durable: name, AckPolicy: nats.AckExplicitPolicy}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := streamGauges(js, "S"); err != nil {
+		t.Fatal(err)
+	}
+	if got := testutil.ToFloat64(metrics.StreamMessages); got != 3 {
+		t.Errorf("stream messages = %v, want 3", got)
+	}
+	if got := testutil.ToFloat64(metrics.ConsumerPending.WithLabelValues("event-dispatcher")); got != 3 {
+		t.Errorf("event-dispatcher pending = %v, want 3", got)
+	}
+	if n := testutil.CollectAndCount(metrics.ConsumerPending); n != 1 {
+		t.Errorf("consumer series = %d, want 1: sse consumers must not become labels", n)
+	}
+	last := testutil.ToFloat64(metrics.StreamLastEvent)
+	if age := time.Since(time.Unix(int64(last), 0)); age < 0 || age > time.Minute {
+		t.Errorf("last event timestamp %v is %v old", last, age)
 	}
 }
