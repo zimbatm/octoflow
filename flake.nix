@@ -16,7 +16,9 @@
         systems = [ "x86_64-linux" ];
       };
     in
-    blueprintOutputs // {
+    # nix-eval-jobs calls a flake that has __functor, and blueprint adds one
+    # that needs a lib/ this repository does not have
+    removeAttrs blueprintOutputs [ "__functor" ] // {
       devShells = inputs.nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ] (system:
         let
           pkgs = inputs.nixpkgs.legacyPackages.${system};
