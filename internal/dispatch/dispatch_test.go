@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,7 +100,7 @@ func TestDispatchGivesEachCopyItsOwnID(t *testing.T) {
 	rec := &recorder{}
 	data := storedEvent(t)
 
-	n, err := Dispatch(context.Background(), rec, "p", data)
+	n, err := Dispatch(context.Background(), rec, "p", data, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,13 +127,13 @@ func TestDispatchGivesEachCopyItsOwnID(t *testing.T) {
 
 func TestDispatchReportsPublishFailure(t *testing.T) {
 	rec := &recorder{fail: errors.New("nats down")}
-	if _, err := Dispatch(context.Background(), rec, "p", storedEvent(t)); err == nil {
+	if _, err := Dispatch(context.Background(), rec, "p", storedEvent(t), nil); err == nil {
 		t.Fatal("expected an error")
 	}
 }
 
 func TestDispatchRejectsUndecodableMessage(t *testing.T) {
-	_, err := Dispatch(context.Background(), &recorder{}, "p", []byte("not json"))
+	_, err := Dispatch(context.Background(), &recorder{}, "p", []byte("not json"), nil)
 	if !errors.Is(err, ErrUndecodable) {
 		t.Errorf("err = %v, want ErrUndecodable", err)
 	}
@@ -157,7 +158,7 @@ func TestDispatchStoresCopiesOnce(t *testing.T) {
 	}
 
 	for i := 0; i < 2; i++ {
-		if _, err := Dispatch(ctx, pub, "p", data); err != nil {
+		if _, err := Dispatch(ctx, pub, "p", data, nil); err != nil {
 			t.Fatalf("dispatch %d: %v", i, err)
 		}
 	}
@@ -168,5 +169,27 @@ func TestDispatchStoresCopiesOnce(t *testing.T) {
 	}
 	if info.State.Msgs != 4 {
 		t.Errorf("stream holds %d messages, want 1 primary + 3 copies; a second dispatch must add none", info.State.Msgs)
+	}
+}
+
+func TestDispatchSkipsUserCopiesForListedTypes(t *testing.T) {
+	rec := &recorder{}
+	if _, err := Dispatch(context.Background(), rec, "p", storedEvent(t), []string{"check_run", "pull_request"}); err != nil {
+		t.Fatal(err)
+	}
+	var subjects []string
+	for _, c := range rec.calls {
+		subjects = append(subjects, c.subject)
+	}
+	if got, want := strings.Join(subjects, " "), "p.repo.7.pull_request p.pr.7.42.pull_request"; got != want {
+		t.Errorf("subjects = %s, want %s: the repo and pr copies stay", got, want)
+	}
+
+	rec = &recorder{}
+	if _, err := Dispatch(context.Background(), rec, "p", storedEvent(t), []string{"check_run"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.calls) != 3 {
+		t.Errorf("%d copies of a type that is not listed, want 3", len(rec.calls))
 	}
 }

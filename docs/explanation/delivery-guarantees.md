@@ -67,7 +67,8 @@ publishing, so a crash replays at most one poll or one hour.
 ## Shutdown
 
 On SIGTERM every service stops taking new work, finishes what it holds,
-and returns; HTTP servers get 30 seconds for in-flight requests. The
+and returns; SSE streams are closed at once, and other HTTP requests get
+30 seconds to finish. The
 NATS connection closes last.
 
 ## After a loss

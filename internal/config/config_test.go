@@ -1,7 +1,9 @@
 package config
 
 import (
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadFromEnvDefaults(t *testing.T) {
@@ -65,5 +67,49 @@ func TestParseBytes(t *testing.T) {
 		if _, err := parseBytes(in); err == nil {
 			t.Errorf("parseBytes(%q) accepted", in)
 		}
+	}
+}
+
+func TestParseAge(t *testing.T) {
+	for in, want := range map[string]time.Duration{"36h": 36 * time.Hour, "30d": 30 * 24 * time.Hour, "1s": time.Second, "90m": 90 * time.Minute} {
+		got, err := parseAge(in)
+		if err != nil || got != want {
+			t.Errorf("parseAge(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "30", "d", "1.5d", "-1d", "0", "500ms", "week"} {
+		if got, err := parseAge(in); err == nil {
+			t.Errorf("parseAge(%q) = %v, want an error", in, got)
+		}
+	}
+}
+
+func TestStreamAgesFromEnv(t *testing.T) {
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NATS.StreamMaxAge != 7*24*time.Hour || cfg.NATS.StreamCopyMaxAge != 0 || cfg.Dispatch.SkipUserEvents != nil {
+		t.Errorf("defaults = %v, %v, %v; want 7 days, copies as long as the stream, every user copy",
+			cfg.NATS.StreamMaxAge, cfg.NATS.StreamCopyMaxAge, cfg.Dispatch.SkipUserEvents)
+	}
+
+	t.Setenv("NATS_STREAM_MAX_AGE", "30d")
+	t.Setenv("NATS_STREAM_COPY_MAX_AGE", "168h")
+	t.Setenv("DISPATCH_USER_SKIP_EVENTS", "check_run, workflow_job")
+	cfg, err = LoadFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NATS.StreamMaxAge != 30*24*time.Hour || cfg.NATS.StreamCopyMaxAge != 7*24*time.Hour {
+		t.Errorf("ages = %v, %v", cfg.NATS.StreamMaxAge, cfg.NATS.StreamCopyMaxAge)
+	}
+	if got := strings.Join(cfg.Dispatch.SkipUserEvents, " "); got != "check_run workflow_job" {
+		t.Errorf("skip = %q", got)
+	}
+
+	t.Setenv("NATS_STREAM_MAX_AGE", "soon")
+	if _, err := LoadFromEnv(); err == nil || !strings.Contains(err.Error(), "NATS_STREAM_MAX_AGE") {
+		t.Errorf("err = %v, want one that names NATS_STREAM_MAX_AGE", err)
 	}
 }

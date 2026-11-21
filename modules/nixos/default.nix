@@ -14,7 +14,8 @@ let
   common = {
     NATS_URL = cfg.natsUrl;
     NATS_STREAM_REPLICAS = "1";
-  };
+  }
+  // cfg.environment;
 
   hardening = {
     DynamicUser = true;
@@ -97,6 +98,17 @@ in
       type = lib.types.bool;
       default = true;
       description = "Run a local NATS server with JetStream, bound to 127.0.0.1.";
+    };
+
+    environment = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      default = { };
+      example = {
+        NATS_STREAM_MAX_AGE = "30d";
+        NATS_STREAM_COPY_MAX_AGE = "7d";
+        DISPATCH_USER_SKIP_EVENTS = "check_run,check_suite,workflow_job,workflow_run,status";
+      };
+      description = "Environment of every unit. The stream settings belong here: each unit applies its own to the stream on start, so they must agree.";
     };
 
     metricsListen = lib.mkOption {

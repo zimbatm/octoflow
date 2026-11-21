@@ -332,3 +332,31 @@ func TestLastEventIDNeverReplaysPastTheCap(t *testing.T) {
 		t.Errorf("Last-Event-ID 0 with a cap of 2 replayed %v, want the last two of org 1", ids)
 	}
 }
+
+func TestShutdownEndsOpenStreams(t *testing.T) {
+	f := newFixture(t)
+	done := make(chan struct{})
+	go func() {
+		// asks for more events than exist, so only the server can end it
+		f.read("/events/org/1?last=1", "", 100)
+		close(done)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for f.h.Clients() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("client did not connect")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	f.h.Shutdown()
+	f.h.Shutdown()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the stream stayed open after Shutdown")
+	}
+	if n := f.consumerCount(); n != 0 {
+		t.Errorf("%d consumers left on the stream, want 0", n)
+	}
+}

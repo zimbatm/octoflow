@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/zimbatm/octoflow/pkg/events"
 )
@@ -43,9 +44,11 @@ func Subjects(prefix string, event *events.GitHubEvent, entities *events.EventEn
 }
 
 // Dispatch republishes one stored event. data is republished as is, so
-// every copy is byte-identical to the original. It returns the number of
-// subjects written.
-func Dispatch(ctx context.Context, pub Publisher, prefix string, data []byte) (int, error) {
+// every copy is byte-identical to the original. An event whose type is in
+// skipUserEvents gets no user copy: CI events are most of a busy
+// repository's traffic, and their one user is the bot or the pusher. It
+// returns the number of subjects written.
+func Dispatch(ctx context.Context, pub Publisher, prefix string, data []byte, skipUserEvents []string) (int, error) {
 	var event events.GitHubEvent
 	if err := json.Unmarshal(data, &event); err != nil {
 		return 0, fmt.Errorf("%w: %v", ErrUndecodable, err)
@@ -58,6 +61,10 @@ func Dispatch(ctx context.Context, pub Publisher, prefix string, data []byte) (i
 			"event_type", event.Event,
 			"error", err)
 		entities = &events.EventEntities{}
+	}
+
+	if slices.Contains(skipUserEvents, event.Event) {
+		entities.UserIDs = nil
 	}
 
 	subjects := Subjects(prefix, &event, entities)

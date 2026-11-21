@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Webhook      WebhookConfig
 	NATS         NATSConfig
+	Dispatch     DispatchConfig
 	S3           S3Config
 	SSE          SSEConfig
 	Dashboard    DashboardConfig
@@ -56,6 +57,10 @@ type NATSConfig struct {
 	StreamMaxAge   time.Duration
 	// oldest messages go first once the stream reaches it; 0 is unlimited
 	StreamMaxBytes int64
+	// fan-out copies expire after it; 0 keeps them as long as the stream.
+	// Every service must agree: it turns on per-message TTLs on the
+	// stream, which the server does not turn off again.
+	StreamCopyMaxAge time.Duration
 
 	MaxReconnects     int
 	ReconnectWait     time.Duration
@@ -87,6 +92,12 @@ type S3Config struct {
 
 	// empty means AWS; set for R2, rustfs and other S3-compatible stores
 	Endpoint string
+}
+
+type DispatchConfig struct {
+	// event types that get no user.{id} copy; the repo, pr and issue
+	// copies stay
+	SkipUserEvents []string
 }
 
 type SSEConfig struct {
@@ -123,6 +134,14 @@ func LoadFromEnv() (*Config, error) {
 		return nil, err
 	}
 	maxBytes, err := envParse("NATS_STREAM_MAX_BYTES", int64(0), parseBytes)
+	if err != nil {
+		return nil, err
+	}
+	maxAge, err := envParse("NATS_STREAM_MAX_AGE", 7*24*time.Hour, parseAge)
+	if err != nil {
+		return nil, err
+	}
+	copyMaxAge, err := envParse("NATS_STREAM_COPY_MAX_AGE", 0, parseAge)
 	if err != nil {
 		return nil, err
 	}
@@ -181,8 +200,9 @@ func LoadFromEnv() (*Config, error) {
 			SubjectPrefix:     getEnvOrDefault("NATS_SUBJECT_PREFIX", "github.events"),
 			StreamName:        getEnvOrDefault("NATS_STREAM_NAME", "GITHUB_EVENTS_RAW"),
 			StreamReplicas:    replicas,
-			StreamMaxAge:      7 * 24 * time.Hour,
+			StreamMaxAge:      maxAge,
 			StreamMaxBytes:    maxBytes,
+			StreamCopyMaxAge:  copyMaxAge,
 			MaxReconnects:     10,
 			ReconnectWait:     2 * time.Second,
 			ConnectionTimeout: 5 * time.Second,
@@ -191,6 +211,7 @@ func LoadFromEnv() (*Config, error) {
 			Token:             os.Getenv("NATS_TOKEN"),
 			NKey:              os.Getenv("NATS_NKEY_SEED"),
 		},
+		Dispatch: DispatchConfig{SkipUserEvents: splitList(os.Getenv("DISPATCH_USER_SKIP_EVENTS"))},
 		S3: S3Config{
 			Region:          getEnvOrDefault("AWS_REGION", "us-east-1"),
 			Bucket:          os.Getenv("S3_BUCKET"),
@@ -281,6 +302,21 @@ func (c *S3Config) Validate() error {
 		return errors.New("S3_BUCKET environment variable is required")
 	}
 	return nil
+}
+
+// parseAge reads a retention: a Go duration such as 36h, or whole days as
+// in 30d. JetStream message TTLs have a resolution of one second.
+func parseAge(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		var n int64
+		n, err = strconv.ParseInt(days, 10, 32)
+		d = time.Duration(n) * 24 * time.Hour
+	}
+	if err != nil || d < time.Second {
+		return 0, fmt.Errorf("not a duration of a second or more: %q", s)
+	}
+	return d, nil
 }
 
 // parseBytes reads a byte count: a bare number, or one with a binary

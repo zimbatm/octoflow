@@ -36,10 +36,20 @@ type Handler struct {
 	// stream bounds; a reconnect storm asks the same question many times
 	cacheMu sync.Mutex
 	cache   map[string]uint64
+	// closed by Shutdown
+	done     chan struct{}
+	shutdown sync.Once
 }
 
 func NewHandler(js nats.JetStreamContext, stream string, maxClients int) *Handler {
-	return &Handler{js: js, stream: stream, MaxClients: maxClients}
+	return &Handler{js: js, stream: stream, MaxClients: maxClients, done: make(chan struct{})}
+}
+
+// Shutdown ends every open stream. http.Server.Shutdown waits for open
+// requests, and an SSE request never ends by itself; the browser
+// reconnects with Last-Event-ID.
+func (h *Handler) Shutdown() {
+	h.shutdown.Do(func() { close(h.done) })
 }
 
 // Clients is the number of open streams.
@@ -78,7 +88,15 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string
 	if err := sw.WriteRetry(5000); err != nil {
 		return
 	}
-	ctx := r.Context()
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	go func() {
+		select {
+		case <-h.done:
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	sub, err := h.subscribe(ctx, subjects, r.Header.Get("Last-Event-ID"), lastCount)
 	if err != nil {
 		slog.Error("Failed to create NATS subscription", "error", err, "subjects", subjects, "stream_id", streamID)

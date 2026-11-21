@@ -10,6 +10,7 @@
 | `enable` | bool | `false` | |
 | `package` | package | the flake's package | |
 | `natsUrl` | string | `nats://127.0.0.1:4222` | `NATS_URL` of every unit |
+| `environment` | attrs of string | `{ }` | environment of every unit, for the settings they must share: `NATS_STREAM_MAX_AGE`, `NATS_STREAM_COPY_MAX_AGE`, `NATS_STREAM_MAX_BYTES`; see [configuration](configuration.md) |
 | `nats.enable` | bool | `true` | run `services.nats` with JetStream on 127.0.0.1 and `max_payload` 32 MiB |
 | `domain` | string or null | `null` | when set, nginx serves it with ACME: the dashboard at `/`, `= /webhook` to the receiver, everything else to the SSE server with buffering off and a 1 h read timeout |
 | `metricsListen` | attrs of string | `webhook = "127.0.0.1:9180"`, `dispatcher = ...9181`, `sse = ...9182`, `s3 = ...9183`, `public-ingest = ...9184`, `nats = ...9185` | `METRICS_LISTEN_ADDR` per service; `""` disables one. `nats` runs `prometheus-nats-exporter` against the local server, whose monitoring port is then 127.0.0.1:8222 |

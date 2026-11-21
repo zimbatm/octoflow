@@ -33,6 +33,8 @@ answers 503; `GET /webhook` answers a help page.
 | `NATS_SUBJECT_PREFIX` | `github.events` | First tokens of every subject. |
 | `NATS_STREAM_NAME` | `GITHUB_EVENTS_RAW` | |
 | `NATS_STREAM_REPLICAS` | `1` | JetStream replicas; needs a cluster above 1. |
+| `NATS_STREAM_MAX_AGE` | `7d` | Retention of the stream: a Go duration such as `36h`, or whole days such as `30d`. Give every service the same value: each one applies its own on start. |
+| `NATS_STREAM_COPY_MAX_AGE` | none, as long as the stream | Fan-out copies expire after this age, so the primary events can stay longer than their copies: `7d` with a `30d` stream keeps a month of replay on the org routes and a week on the repo, user, pr and issue routes. It turns per-message TTLs on for the stream; nats-server 2.11 or later, and it does not turn them off again. |
 | `NATS_STREAM_MAX_BYTES` | none | Size cap of the stream, for example `10GiB`; the oldest messages are dropped first. A bare number is bytes; `K`, `M`, `G`, `T` are binary suffixes, `iB` or `B` may follow. Must fit in the server's `max_file_store`, or the stream cannot be created. Without it the server limit applies and publishes fail once it is full. |
 | `NATS_USERNAME`, `NATS_PASSWORD` | none | User and password. |
 | `NATS_TOKEN` | none | Token, when no user is set. |
@@ -44,9 +46,15 @@ envelope. The server default is 1 MiB, above which the receiver answers
 503 to every delivery. The NixOS module sets it; the receiver logs a
 warning at startup when the server limit is too low.
 
-Fixed: file storage, 7 days retention, 24 h duplicate window (shortened
+Fixed: file storage, 24 h duplicate window (shortened
 to the retention when that is less), 10 reconnects 2 s apart, 5 s
 connection timeout.
+
+## Dispatcher
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DISPATCH_USER_SKIP_EVENTS` | none | Comma-separated event types that get no `user.{id}` copy, for example `check_run,check_suite,workflow_job,workflow_run,status`. CI events are most of the traffic of a busy repository, and their user is a bot or the pusher. The repo, pr and issue copies stay. |
 
 ## S3 (the `s3` service)
 
@@ -74,7 +82,8 @@ compression, row groups of 10000.
 
 Fixed: `?last=` defaults to 50 and is capped at 1000; heartbeat every
 30 s; a consumer per connection, removed one minute after the client
-leaves.
+leaves. On shutdown the server closes every stream at once; browsers
+reconnect with `Last-Event-ID`.
 
 ## Dashboard
 

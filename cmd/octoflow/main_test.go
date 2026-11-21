@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -137,5 +139,41 @@ func TestStreamGauges(t *testing.T) {
 	last := testutil.ToFloat64(metrics.StreamLastEvent)
 	if age := time.Since(time.Unix(int64(last), 0)); age < 0 || age > time.Minute {
 		t.Errorf("last event timestamp %v is %v old", last, age)
+	}
+}
+
+func TestServerShutdownDoesNotWaitForSSEClients(t *testing.T) {
+	_, js := natstest.Start(t)
+	cfg := &config.Config{}
+	cfg.SSE.ListenAddr = "127.0.0.1:0"
+	cfg.NATS = config.NATSConfig{SubjectPrefix: "p", StreamName: "P", StreamReplicas: 1, StreamMaxAge: time.Hour}
+	if _, err := js.AddStream(&nats.StreamConfig{Name: "P", Subjects: []string{"p.>"}}); err != nil {
+		t.Fatal(err)
+	}
+	servers, err := httpServers(mustPick(t, "sse", cfg), cfg, js)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := servers[0]
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = srv.Serve(ln) }()
+
+	resp, err := http.Get("http://" + ln.Addr().String() + "/events?last=0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	// the first bytes are on the wire once the stream is open
+	if _, err := resp.Body.Read(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		t.Fatalf("Shutdown with an open SSE stream: %v", err)
 	}
 }

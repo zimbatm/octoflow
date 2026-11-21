@@ -25,15 +25,15 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-func webhookRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) error {
+func webhookRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) (func(), error) {
 	if cfg.Webhook.Secret == "" {
 		if !cfg.Webhook.AllowUnsigned {
-			return errors.New("WEBHOOK_SECRET is not set; set it, or WEBHOOK_ALLOW_UNSIGNED=true to accept unsigned deliveries")
+			return nil, errors.New("WEBHOOK_SECRET is not set; set it, or WEBHOOK_ALLOW_UNSIGNED=true to accept unsigned deliveries")
 		}
 		slog.Warn("WEBHOOK_SECRET is not set; unsigned deliveries are accepted")
 	}
 	webhook.Routes(mux, &cfg.Webhook, natsInternal.NewPublisher(js, &cfg.NATS))
-	return nil
+	return nil, nil
 }
 
 func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {
@@ -50,7 +50,7 @@ func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamCon
 	publisher := natsInternal.NewPublisher(js, &cfg.NATS)
 
 	pullLoop(ctx, cfg, js, consumer, func(msg *nats.Msg) {
-		_, err := dispatch.Dispatch(ctx, publisher, cfg.NATS.SubjectPrefix, msg.Data)
+		_, err := dispatch.Dispatch(ctx, publisher, cfg.NATS.SubjectPrefix, msg.Data, cfg.Dispatch.SkipUserEvents)
 		switch {
 		case errors.Is(err, dispatch.ErrUndecodable):
 			metrics.DispatchedEvents.WithLabelValues("undecodable").Inc()
@@ -118,24 +118,25 @@ func runS3(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) er
 	return nil
 }
 
-func sseRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) error {
-	sse.Routes(mux, sse.NewHandler(js, cfg.NATS.StreamName, cfg.SSE.MaxClients), cfg.NATS.SubjectPrefix)
-	return nil
+func sseRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) (func(), error) {
+	h := sse.NewHandler(js, cfg.NATS.StreamName, cfg.SSE.MaxClients)
+	sse.Routes(mux, h, cfg.NATS.SubjectPrefix)
+	return h.Shutdown, nil
 }
 
 // dashboardRoutes serves WEB_DIR at /, so it goes last on a shared mux:
 // the mux prefers the more specific patterns of the other services.
-func dashboardRoutes(cfg *config.Config, _ nats.JetStreamContext, mux *http.ServeMux) error {
+func dashboardRoutes(cfg *config.Config, _ nats.JetStreamContext, mux *http.ServeMux) (func(), error) {
 	webDir, err := filepath.Abs(cfg.Dashboard.WebDir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := os.Stat(filepath.Join(webDir, "index.html")); err != nil {
-		return fmt.Errorf("WEB_DIR must hold index.html: %w", err)
+		return nil, fmt.Errorf("WEB_DIR must hold index.html: %w", err)
 	}
 	slog.Info("Dashboard served", "web_dir", webDir)
 	mux.Handle("/", http.FileServer(http.Dir(webDir)))
-	return nil
+	return nil, nil
 }
 
 func runPublicIngest(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {
