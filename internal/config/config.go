@@ -15,6 +15,7 @@ import (
 type Config struct {
 	Webhook      WebhookConfig
 	NATS         NATSConfig
+	Dispatch     DispatchConfig
 	S3           S3Config
 	SSE          SSEConfig
 	Dashboard    DashboardConfig
@@ -91,6 +92,12 @@ type S3Config struct {
 
 	// empty means AWS; set for R2, rustfs and other S3-compatible stores
 	Endpoint string
+}
+
+type DispatchConfig struct {
+	// event types that get no user.{id} copy; the repo, pr and issue
+	// copies stay
+	SkipUserEvents []string
 }
 
 type SSEConfig struct {
@@ -204,6 +211,7 @@ func LoadFromEnv() (*Config, error) {
 			Token:             os.Getenv("NATS_TOKEN"),
 			NKey:              os.Getenv("NATS_NKEY_SEED"),
 		},
+		Dispatch: DispatchConfig{SkipUserEvents: splitList(os.Getenv("DISPATCH_USER_SKIP_EVENTS"))},
 		S3: S3Config{
 			Region:          getEnvOrDefault("AWS_REGION", "us-east-1"),
 			Bucket:          os.Getenv("S3_BUCKET"),

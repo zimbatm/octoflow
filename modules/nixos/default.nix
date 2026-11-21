@@ -106,6 +106,7 @@ in
       example = {
         NATS_STREAM_MAX_AGE = "30d";
         NATS_STREAM_COPY_MAX_AGE = "7d";
+        DISPATCH_USER_SKIP_EVENTS = "check_run,check_suite,workflow_job,workflow_run,status";
       };
       description = "Environment of every unit. The stream settings belong here: each unit applies its own to the stream on start, so they must agree.";
     };

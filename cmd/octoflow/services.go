@@ -50,7 +50,7 @@ func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamCon
 	publisher := natsInternal.NewPublisher(js, &cfg.NATS)
 
 	pullLoop(ctx, cfg, js, consumer, func(msg *nats.Msg) {
-		_, err := dispatch.Dispatch(ctx, publisher, cfg.NATS.SubjectPrefix, msg.Data)
+		_, err := dispatch.Dispatch(ctx, publisher, cfg.NATS.SubjectPrefix, msg.Data, cfg.Dispatch.SkipUserEvents)
 		switch {
 		case errors.Is(err, dispatch.ErrUndecodable):
 			metrics.DispatchedEvents.WithLabelValues("undecodable").Inc()

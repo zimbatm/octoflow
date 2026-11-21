@@ -72,7 +72,7 @@ func TestStreamDeletesTheEventAndItsCopies(t *testing.T) {
 			t.Fatal(err)
 		}
 		data, _ := json.Marshal(ev)
-		if _, err := dispatch.Dispatch(ctx, pub, "p", data); err != nil {
+		if _, err := dispatch.Dispatch(ctx, pub, "p", data, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

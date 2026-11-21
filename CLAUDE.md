@@ -104,6 +104,7 @@ NATS_URL=nats://localhost:4222
 NATS_USERNAME / NATS_PASSWORD / NATS_TOKEN / NATS_NKEY_SEED
 NATS_STREAM_REPLICAS=1        # NATS_STREAM_MAX_BYTES=10GiB caps the stream, default none
 NATS_STREAM_MAX_AGE=7d        # same on every service; NATS_STREAM_COPY_MAX_AGE expires the fan-out copies earlier
+DISPATCH_USER_SKIP_EVENTS=    # dispatcher only: event types without user copies, e.g. check_run,workflow_job
 PUBLIC_REPOS=NixOS/nixpkgs    # public-ingest only; GITHUB_TOKEN, EVENTS_API_INTERVAL, GHARCHIVE_START
 HTTP_LISTEN_ADDR=:8080        # webhook, sse and dashboard; WEBHOOK_/SSE_/DASHBOARD_LISTEN_ADDR split them; WEB_DIR=./web
 METRICS_LISTEN_ADDR=:9180     # Prometheus /metrics and /healthz; unset disables

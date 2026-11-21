@@ -50,6 +50,12 @@ Fixed: file storage, 24 h duplicate window (shortened
 to the retention when that is less), 10 reconnects 2 s apart, 5 s
 connection timeout.
 
+## Dispatcher
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DISPATCH_USER_SKIP_EVENTS` | none | Comma-separated event types that get no `user.{id}` copy, for example `check_run,check_suite,workflow_job,workflow_run,status`. CI events are most of the traffic of a busy repository, and their user is a bot or the pusher. The repo, pr and issue copies stay. |
+
 ## S3 (the `s3` service)
 
 | Variable | Default | Meaning |

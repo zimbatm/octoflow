@@ -22,7 +22,7 @@ Written by the dispatcher, one copy per subject.
 | Subject | One copy per |
 |---|---|
 | `github.events.repo.{repo_id}.{event_type}` | event with a repository |
-| `github.events.user.{user_id}.{event_type}` | involved user: sender, PR or issue author, assignees, requested reviewers, comment and review authors, team members |
+| `github.events.user.{user_id}.{event_type}` | involved user: sender, PR or issue author, assignees, requested reviewers, comment and review authors, team members; none for the types in `DISPATCH_USER_SKIP_EVENTS` |
 | `github.events.pr.{repo_id}.{number}.{event_type}` | `pull_request`, `pull_request_review` and `pull_request_review_comment` event |
 | `github.events.issue.{repo_id}.{number}.{event_type}` | `issues` and `issue_comment` event |
 

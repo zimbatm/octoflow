@@ -89,19 +89,23 @@ func TestStreamAgesFromEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.NATS.StreamMaxAge != 7*24*time.Hour || cfg.NATS.StreamCopyMaxAge != 0 {
-		t.Errorf("defaults = %v, %v; want 7 days, copies as long as the stream",
-			cfg.NATS.StreamMaxAge, cfg.NATS.StreamCopyMaxAge)
+	if cfg.NATS.StreamMaxAge != 7*24*time.Hour || cfg.NATS.StreamCopyMaxAge != 0 || cfg.Dispatch.SkipUserEvents != nil {
+		t.Errorf("defaults = %v, %v, %v; want 7 days, copies as long as the stream, every user copy",
+			cfg.NATS.StreamMaxAge, cfg.NATS.StreamCopyMaxAge, cfg.Dispatch.SkipUserEvents)
 	}
 
 	t.Setenv("NATS_STREAM_MAX_AGE", "30d")
 	t.Setenv("NATS_STREAM_COPY_MAX_AGE", "168h")
+	t.Setenv("DISPATCH_USER_SKIP_EVENTS", "check_run, workflow_job")
 	cfg, err = LoadFromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.NATS.StreamMaxAge != 30*24*time.Hour || cfg.NATS.StreamCopyMaxAge != 7*24*time.Hour {
 		t.Errorf("ages = %v, %v", cfg.NATS.StreamMaxAge, cfg.NATS.StreamCopyMaxAge)
+	}
+	if got := strings.Join(cfg.Dispatch.SkipUserEvents, " "); got != "check_run workflow_job" {
+		t.Errorf("skip = %q", got)
 	}
 
 	t.Setenv("NATS_STREAM_MAX_AGE", "soon")
