@@ -41,9 +41,10 @@ type service struct {
 	// nil means always.
 	enabled func(*config.Config) bool
 	// addr and routes describe an HTTP service; services on the same
-	// address share one server and its /health.
+	// address share one server and its /health. routes may return a
+	// function that ends its long-lived requests when the server shuts down.
 	addr   func(*config.Config) string
-	routes func(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) error
+	routes func(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) (onShutdown func(), err error)
 	// run is the work of the other services.
 	run func(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error
 }
@@ -335,30 +336,35 @@ func terminate(msg *nats.Msg, why string, err error) {
 // no read or write timeout because SSE streams stay open; the webhook
 // handler sets its own deadlines.
 func httpServers(selected []service, cfg *config.Config, js nats.JetStreamContext) ([]*http.Server, error) {
-	muxes := map[string]*http.ServeMux{}
+	byAddr := map[string]*http.Server{}
 	var servers []*http.Server
 	for _, s := range selected {
 		if s.routes == nil {
 			continue
 		}
 		addr := s.addr(cfg)
-		mux, ok := muxes[addr]
+		srv, ok := byAddr[addr]
 		if !ok {
-			mux = http.NewServeMux()
+			mux := http.NewServeMux()
 			mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = io.WriteString(w, `{"status":"healthy"}`)
 			})
-			muxes[addr] = mux
-			servers = append(servers, &http.Server{
+			srv = &http.Server{
 				Addr:              addr,
 				Handler:           mux,
 				ReadHeaderTimeout: 5 * time.Second,
 				IdleTimeout:       120 * time.Second,
-			})
+			}
+			byAddr[addr] = srv
+			servers = append(servers, srv)
 		}
-		if err := s.routes(cfg, js, mux); err != nil {
+		onShutdown, err := s.routes(cfg, js, srv.Handler.(*http.ServeMux))
+		if err != nil {
 			return nil, fmt.Errorf("%s: %w", s.name, err)
+		}
+		if onShutdown != nil {
+			srv.RegisterOnShutdown(onShutdown)
 		}
 	}
 	return servers, nil

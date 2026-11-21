@@ -74,7 +74,8 @@ compression, row groups of 10000.
 
 Fixed: `?last=` defaults to 50 and is capped at 1000; heartbeat every
 30 s; a consumer per connection, removed one minute after the client
-leaves.
+leaves. On shutdown the server closes every stream at once; browsers
+reconnect with `Last-Event-ID`.
 
 ## Dashboard
 

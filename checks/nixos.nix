@@ -107,6 +107,14 @@ pkgs.testers.runNixOSTest {
         timeout=60,
       )
 
+    with subtest("the SSE server stops at once with a client connected"):
+      machine.succeed("curl -sN http://127.0.0.1:8181/events >/dev/null 2>&1 &")
+      machine.wait_until_succeeds("curl -sf http://127.0.0.1:8181/stats | grep -c '\"total_clients\":1'")
+      machine.succeed("timeout 10 systemctl stop octoflow-sse")
+      machine.fail("systemctl is-failed octoflow-sse")
+      machine.succeed("systemctl start octoflow-sse")
+      machine.wait_for_open_port(8181)
+
     with subtest("the s3-worker writes the batch when it stops"):
       machine.succeed("systemctl stop octoflow-s3")
       machine.succeed("journalctl -u octoflow-s3 | grep 'msg=\"Uploaded batch to S3\" event_count=1'")
