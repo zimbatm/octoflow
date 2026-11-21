@@ -50,7 +50,7 @@ an event once per subject it was routed to.
 | Subjects | `github.events.>` |
 | Storage | file |
 | Replicas | `NATS_STREAM_REPLICAS`, default 1 |
-| Retention | limits policy, discard old, max age 7 days |
+| Retention | limits policy, discard old, max age `NATS_STREAM_MAX_AGE`, default 7 days |
 | Duplicate window | 24 hours, or the max age when that is shorter |
 | Max consumers | unlimited |
 

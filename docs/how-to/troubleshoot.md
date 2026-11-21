@@ -81,7 +81,7 @@ Otherwise:
 ## The stream grows too large
 
 Every event is stored once per routed subject, 3 to 6 copies, for 7
-days (the retention is not configurable yet). `octoflow_stream_messages`
+days by default (`NATS_STREAM_MAX_AGE`). `octoflow_stream_messages`
 and `octoflow_stream_bytes` show the trend. To drop everything at once:
 `nats stream purge GITHUB_EVENTS_RAW -f` keeps the consumers and removes
 the messages. [Architecture](../explanation/architecture.md) says what a

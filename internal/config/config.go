@@ -126,6 +126,10 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	maxAge, err := envParse("NATS_STREAM_MAX_AGE", 7*24*time.Hour, parseAge)
+	if err != nil {
+		return nil, err
+	}
 	pollInterval, err := envParse("EVENTS_API_INTERVAL", time.Minute, time.ParseDuration)
 	if err != nil {
 		return nil, err
@@ -181,7 +185,7 @@ func LoadFromEnv() (*Config, error) {
 			SubjectPrefix:     getEnvOrDefault("NATS_SUBJECT_PREFIX", "github.events"),
 			StreamName:        getEnvOrDefault("NATS_STREAM_NAME", "GITHUB_EVENTS_RAW"),
 			StreamReplicas:    replicas,
-			StreamMaxAge:      7 * 24 * time.Hour,
+			StreamMaxAge:      maxAge,
 			StreamMaxBytes:    maxBytes,
 			MaxReconnects:     10,
 			ReconnectWait:     2 * time.Second,
@@ -281,6 +285,21 @@ func (c *S3Config) Validate() error {
 		return errors.New("S3_BUCKET environment variable is required")
 	}
 	return nil
+}
+
+// parseAge reads a retention: a Go duration such as 36h, or whole days as
+// in 30d. JetStream message TTLs have a resolution of one second.
+func parseAge(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		var n int64
+		n, err = strconv.ParseInt(days, 10, 32)
+		d = time.Duration(n) * 24 * time.Hour
+	}
+	if err != nil || d < time.Second {
+		return 0, fmt.Errorf("not a duration of a second or more: %q", s)
+	}
+	return d, nil
 }
 
 // parseBytes reads a byte count: a bare number, or one with a binary

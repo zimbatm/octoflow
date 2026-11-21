@@ -40,7 +40,7 @@ back up, size and monitor, and it lets the SSE server replay and resume
 by one sequence number across every route. The price is that the same
 payload is stored once per subject it is routed to: with a repository,
 a sender and a pull request author that is four copies. Retention is
-seven days, so the cost is bounded, and the typeless PR and issue copies
+seven days by default, so the cost is bounded, and the typeless PR and issue copies
 that an earlier design also wrote were dropped because they doubled the
 cost for a cosmetic gain. If the stream still grows too large, the next
 step is a second stream for the copies with shorter retention; the

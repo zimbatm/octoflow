@@ -29,6 +29,9 @@ pkgs.testers.runNixOSTest {
 
       services.octoflow = {
         enable = true;
+        environment = {
+          NATS_STREAM_MAX_AGE = "30d";
+        };
         webhook.environmentFile = pkgs.writeText "webhook.env" "WEBHOOK_SECRET=s3cret";
         s3 = {
           bucket = "octoflow";
@@ -105,6 +108,12 @@ pkgs.testers.runNixOSTest {
       machine.wait_until_succeeds(
         "curl -sf http://127.0.0.1:9181/metrics | grep -c '^octoflow_stream_messages [1-9]'",
         timeout=60,
+      )
+
+    with subtest("every unit applies the shared stream settings"):
+      machine.succeed(
+        "nats --server nats://127.0.0.1:4222 stream info GITHUB_EVENTS_RAW --json "
+        "| jq -e '.config.max_age == 30 * 86400e9'"
       )
 
     with subtest("the SSE server stops at once with a client connected"):
