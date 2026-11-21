@@ -36,9 +36,13 @@ func EnsureStream(js nats.JetStreamContext, cfg *config.NATSConfig) error {
 		Duplicates:   duplicates,
 	}
 
-	_, err := js.StreamInfo(sc.Name)
+	sc.AllowMsgTTL = cfg.StreamCopyMaxAge > 0
+
+	info, err := js.StreamInfo(sc.Name)
 	switch {
 	case err == nil:
+		// the server refuses to turn per-message TTLs off again
+		sc.AllowMsgTTL = sc.AllowMsgTTL || info.Config.AllowMsgTTL
 		_, err = js.UpdateStream(sc)
 	case errors.Is(err, nats.ErrStreamNotFound):
 		_, err = js.AddStream(sc)

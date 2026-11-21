@@ -56,6 +56,10 @@ type NATSConfig struct {
 	StreamMaxAge   time.Duration
 	// oldest messages go first once the stream reaches it; 0 is unlimited
 	StreamMaxBytes int64
+	// fan-out copies expire after it; 0 keeps them as long as the stream.
+	// Every service must agree: it turns on per-message TTLs on the
+	// stream, which the server does not turn off again.
+	StreamCopyMaxAge time.Duration
 
 	MaxReconnects     int
 	ReconnectWait     time.Duration
@@ -130,6 +134,10 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	copyMaxAge, err := envParse("NATS_STREAM_COPY_MAX_AGE", 0, parseAge)
+	if err != nil {
+		return nil, err
+	}
 	pollInterval, err := envParse("EVENTS_API_INTERVAL", time.Minute, time.ParseDuration)
 	if err != nil {
 		return nil, err
@@ -187,6 +195,7 @@ func LoadFromEnv() (*Config, error) {
 			StreamReplicas:    replicas,
 			StreamMaxAge:      maxAge,
 			StreamMaxBytes:    maxBytes,
+			StreamCopyMaxAge:  copyMaxAge,
 			MaxReconnects:     10,
 			ReconnectWait:     2 * time.Second,
 			ConnectionTimeout: 5 * time.Second,

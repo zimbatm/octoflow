@@ -31,6 +31,7 @@ pkgs.testers.runNixOSTest {
         enable = true;
         environment = {
           NATS_STREAM_MAX_AGE = "30d";
+          NATS_STREAM_COPY_MAX_AGE = "7d";
         };
         webhook.environmentFile = pkgs.writeText "webhook.env" "WEBHOOK_SECRET=s3cret";
         s3 = {
@@ -113,7 +114,7 @@ pkgs.testers.runNixOSTest {
     with subtest("every unit applies the shared stream settings"):
       machine.succeed(
         "nats --server nats://127.0.0.1:4222 stream info GITHUB_EVENTS_RAW --json "
-        "| jq -e '.config.max_age == 30 * 86400e9'"
+        "| jq -e '.config.max_age == 30 * 86400e9 and .config.allow_msg_ttl'"
       )
 
     with subtest("the SSE server stops at once with a client connected"):

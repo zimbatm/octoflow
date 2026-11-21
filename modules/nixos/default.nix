@@ -105,6 +105,7 @@ in
       default = { };
       example = {
         NATS_STREAM_MAX_AGE = "30d";
+        NATS_STREAM_COPY_MAX_AGE = "7d";
       };
       description = "Environment of every unit. The stream settings belong here: each unit applies its own to the stream on start, so they must agree.";
     };

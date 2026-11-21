@@ -34,6 +34,7 @@ answers 503; `GET /webhook` answers a help page.
 | `NATS_STREAM_NAME` | `GITHUB_EVENTS_RAW` | |
 | `NATS_STREAM_REPLICAS` | `1` | JetStream replicas; needs a cluster above 1. |
 | `NATS_STREAM_MAX_AGE` | `7d` | Retention of the stream: a Go duration such as `36h`, or whole days such as `30d`. Give every service the same value: each one applies its own on start. |
+| `NATS_STREAM_COPY_MAX_AGE` | none, as long as the stream | Fan-out copies expire after this age, so the primary events can stay longer than their copies: `7d` with a `30d` stream keeps a month of replay on the org routes and a week on the repo, user, pr and issue routes. It turns per-message TTLs on for the stream; nats-server 2.11 or later, and it does not turn them off again. |
 | `NATS_STREAM_MAX_BYTES` | none | Size cap of the stream, for example `10GiB`; the oldest messages are dropped first. A bare number is bytes; `K`, `M`, `G`, `T` are binary suffixes, `iB` or `B` may follow. Must fit in the server's `max_file_store`, or the stream cannot be created. Without it the server limit applies and publishes fail once it is full. |
 | `NATS_USERNAME`, `NATS_PASSWORD` | none | User and password. |
 | `NATS_TOKEN` | none | Token, when no user is set. |

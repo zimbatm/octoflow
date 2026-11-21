@@ -42,9 +42,9 @@ payload is stored once per subject it is routed to: with a repository,
 a sender and a pull request author that is four copies. Retention is
 seven days by default, so the cost is bounded, and the typeless PR and issue copies
 that an earlier design also wrote were dropped because they doubled the
-cost for a cosmetic gain. If the stream still grows too large, the next
-step is a second stream for the copies with shorter retention; the
-primary stream would keep the full week.
+cost for a cosmetic gain. If the stream still grows too large,
+`NATS_STREAM_COPY_MAX_AGE` gives the copies a shorter life than the
+primary events.
 
 ## Numeric ids in subjects
 

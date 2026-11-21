@@ -244,3 +244,72 @@ func TestConnectGivesUpAfterTheTimeout(t *testing.T) {
 		t.Errorf("gave up after %s, want about the 1.5 s timeout", d)
 	}
 }
+
+func TestCopiesExpireBeforeTheStream(t *testing.T) {
+	_, js := natstest.Start(t)
+	cfg := testConfig()
+	cfg.StreamCopyMaxAge = time.Second
+	if err := EnsureStream(js, cfg); err != nil {
+		t.Fatal(err)
+	}
+	p := NewPublisher(js, cfg)
+	ctx := context.Background()
+
+	if _, err := p.Publish(ctx, &events.GitHubEvent{ID: "d1", Event: "push", OrganizationID: "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.PublishToSubject(ctx, "t.events.repo.7.push", "push", []byte(`{"id":"d1"}`), "d1@t.events.repo.7.push"); err != nil {
+		t.Fatal(err)
+	}
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		info, err := js.StreamInfo(cfg.StreamName, &nats.StreamInfoRequest{SubjectsFilter: ">"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if info.State.Subjects["t.events.org.1.push"] != 1 {
+			t.Fatalf("subjects = %v: the primary event must stay", info.State.Subjects)
+		}
+		if info.State.Subjects["t.events.repo.7.push"] == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the copy is still stored after its 1s age: %v", info.State.Subjects)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func TestEnsureStreamKeepsMessageTTLsOn(t *testing.T) {
+	_, js := natstest.Start(t)
+	cfg := testConfig()
+	cfg.StreamCopyMaxAge = time.Hour
+	if err := EnsureStream(js, cfg); err != nil {
+		t.Fatal(err)
+	}
+	// a service started without the setting must not fail on the stream
+	cfg.StreamCopyMaxAge = 0
+	if err := EnsureStream(js, cfg); err != nil {
+		t.Fatalf("update without NATS_STREAM_COPY_MAX_AGE: %v", err)
+	}
+	info, err := js.StreamInfo(cfg.StreamName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.Config.AllowMsgTTL {
+		t.Error("per-message TTLs were turned off")
+	}
+}
+
+func TestEnsureStreamTurnsMessageTTLsOnLater(t *testing.T) {
+	_, js := natstest.Start(t)
+	cfg := testConfig()
+	if err := EnsureStream(js, cfg); err != nil {
+		t.Fatal(err)
+	}
+	cfg.StreamCopyMaxAge = time.Hour
+	if err := EnsureStream(js, cfg); err != nil {
+		t.Fatalf("turning copy expiry on for an existing stream: %v", err)
+	}
+}

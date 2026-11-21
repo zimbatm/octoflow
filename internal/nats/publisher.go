@@ -24,10 +24,12 @@ const publishTimeout = 10 * time.Second
 type Publisher struct {
 	prefix string
 	js     nats.JetStreamContext
+	// set on the fan-out copies only; 0 leaves them to the stream's age
+	copyTTL time.Duration
 }
 
 func NewPublisher(js nats.JetStreamContext, cfg *config.NATSConfig) *Publisher {
-	return &Publisher{prefix: cfg.SubjectPrefix, js: js}
+	return &Publisher{prefix: cfg.SubjectPrefix, js: js, copyTTL: cfg.StreamCopyMaxAge}
 }
 
 // Publish stores a GitHub event under its org or global subject with
@@ -55,21 +57,26 @@ func (p *Publisher) Subject(event *events.GitHubEvent) string {
 	return fmt.Sprintf("%s.global.%s", p.prefix, event.Event)
 }
 
-// PublishToSubject publishes data and waits for the stream's ack. msgID is
-// the deduplication id; eventType only labels the metrics.
+// PublishToSubject publishes a fan-out copy and waits for the stream's ack.
+// msgID is the deduplication id; eventType only labels the metrics. The
+// copy expires after NATS_STREAM_COPY_MAX_AGE when that is set.
 func (p *Publisher) PublishToSubject(ctx context.Context, subject, eventType string, data []byte, msgID string) error {
-	_, err := p.publish(ctx, subject, eventType, data, msgID)
+	var opts []nats.PubOpt
+	if p.copyTTL > 0 {
+		opts = append(opts, nats.MsgTTL(p.copyTTL))
+	}
+	_, err := p.publish(ctx, subject, eventType, data, msgID, opts...)
 	return err
 }
 
-func (p *Publisher) publish(ctx context.Context, subject, eventType string, data []byte, msgID string) (*nats.PubAck, error) {
+func (p *Publisher) publish(ctx context.Context, subject, eventType string, data []byte, msgID string, opts ...nats.PubOpt) (*nats.PubAck, error) {
 	ctx, cancel := context.WithTimeout(ctx, publishTimeout)
 	defer cancel()
 	start := time.Now()
 	status := "success"
 	defer func() { p.record(eventType, status, time.Since(start)) }()
 
-	future, err := p.js.PublishAsync(subject, data, nats.MsgId(msgID))
+	future, err := p.js.PublishAsync(subject, data, append(opts, nats.MsgId(msgID))...)
 	if err != nil {
 		status = "publish_error"
 		return nil, fmt.Errorf("failed to publish to JetStream: %w", err)
