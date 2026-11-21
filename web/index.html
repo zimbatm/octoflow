@@ -561,8 +561,12 @@
             <!-- Stats Bar -->
             <div class="stats-bar">
                 <div class="stat-item">
-                    <div class="stat-label">Total Events</div>
-                    <div class="stat-value" id="total-events">0</div>
+                    <div class="stat-label">Events Stored</div>
+                    <div class="stat-value" id="events-stored" title="Events in the stream, without the fan-out copies">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Shown Here</div>
+                    <div class="stat-value" id="events-shown" title="Events of the active stream that this page received">0</div>
                 </div>
                 <div class="stat-item">
                     <div class="stat-label">Events/Min</div>
@@ -770,7 +774,7 @@
             seen.add(event.id);
             if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);
             stats.total++;
-            // replayed events count toward the total, not toward the rate
+            // replayed events count as shown, not toward the rate
             stats.timestamps.push(Date.parse(event.received_at) || Date.now());
             const emptyState = document.querySelector('.empty-state');
             if (emptyState) emptyState.remove();
@@ -842,14 +846,21 @@
         function updateStats() {
             const oneMinuteAgo = Date.now() - 60000;
             stats.timestamps = stats.timestamps.filter(ts => ts > oneMinuteAgo);
-            $('total-events').textContent = stats.total;
+            $('events-shown').textContent = stats.total;
             $('events-per-minute').textContent = stats.timestamps.length;
         }
 
         function fetchStats() {
             fetch(SSE_BASE + '/stats')
                 .then(response => response.json())
-                .then(data => { $('connected-clients').textContent = data.total_clients ?? '-'; })
+                .then(data => {
+                    $('connected-clients').textContent = data.total_clients ?? '-';
+                    const stored = $('events-stored');
+                    stored.textContent = data.events_stored?.toLocaleString() ?? '-';
+                    if (data.stored_since) {
+                        stored.title = 'Events in the stream since ' + new Date(data.stored_since).toLocaleString() + ', without the fan-out copies';
+                    }
+                })
                 .catch(error => console.error('Error fetching stats:', error));
         }
 

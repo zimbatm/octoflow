@@ -1,9 +1,12 @@
 package sse
 
 import (
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
 	"github.com/zimbatm/octoflow/pkg/events"
@@ -17,9 +20,20 @@ func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 		mux.Handle("OPTIONS "+pattern, cors(nil))
 	}
 
+	// events_stored and stored_since are left out when the stream cannot
+	// say; the client count never depends on NATS.
 	get("/stats", func(w http.ResponseWriter, r *http.Request) {
+		stats := map[string]any{"total_clients": h.Clients()}
+		if n, since, err := h.Stored(natsInternal.PrimarySubjects(prefix)); err != nil {
+			slog.Warn("Failed to count stored events", "error", err)
+		} else {
+			stats["events_stored"] = n
+			if !since.IsZero() {
+				stats["stored_since"] = since.UTC().Format(time.RFC3339)
+			}
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"total_clients":%d}`, h.Clients())
+		_ = json.NewEncoder(w).Encode(stats)
 	})
 
 	get("/events", func(w http.ResponseWriter, r *http.Request) {

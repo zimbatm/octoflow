@@ -360,3 +360,36 @@ func TestShutdownEndsOpenStreams(t *testing.T) {
 		t.Errorf("%d consumers left on the stream, want 0", n)
 	}
 }
+
+func TestStatsCountsStoredEventsWithoutCopies(t *testing.T) {
+	f := newFixture(t)
+	resp, err := http.Get(f.server.URL + "/stats")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var stats struct {
+		TotalClients *int      `json:"total_clients"`
+		EventsStored *uint64   `json:"events_stored"`
+		StoredSince  time.Time `json:"stored_since"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+		t.Fatal(err)
+	}
+	if stats.TotalClients == nil || *stats.TotalClients != 0 {
+		t.Errorf("total_clients = %v, want 0", stats.TotalClients)
+	}
+	// the fixture stores 6 events and a repo copy of each
+	if stats.EventsStored == nil || *stats.EventsStored != 6 {
+		t.Errorf("events_stored = %v, want 6: the copies must not count", stats.EventsStored)
+	}
+	if age := time.Since(stats.StoredSince); age < 0 || age > time.Minute {
+		t.Errorf("stored_since = %v, want the store time of the first message", stats.StoredSince)
+	}
+
+	// the count is cached: a new event does not show at once
+	f.publish("d7", "1", "push")
+	if n, _, err := f.h.Stored([]string{"p.org.>", "p.global.>"}); err != nil || n != 6 {
+		t.Errorf("Stored() right after = %d, %v; want the cached 6", n, err)
+	}
+}

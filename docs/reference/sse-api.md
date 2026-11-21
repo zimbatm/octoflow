@@ -24,7 +24,7 @@ anything else is a 404.
 
 | Route | Answers |
 |---|---|
-| `/stats` | JSON: `{"total_clients": N}`, the open connections of this process |
+| `/stats` | JSON: `total_clients`, the open connections of this process; `events_stored`, the events in the stream without the fan-out copies, refreshed every 30 seconds; `stored_since`, the store time of the oldest message. The last two are absent when the stream does not answer |
 | `/health` | `{"status":"healthy"}`; shared by every service on the address |
 
 ## Query parameters

@@ -39,6 +39,9 @@ type Handler struct {
 	// closed by Shutdown
 	done     chan struct{}
 	shutdown sync.Once
+	// the last answer of Stored
+	storedMu sync.Mutex
+	stored   stored
 }
 
 func NewHandler(js nats.JetStreamContext, stream string, maxClients int) *Handler {
@@ -297,4 +300,41 @@ func (h *Handler) pendingFrom(subjects []string, seq uint64) (uint64, error) {
 	}
 	h.deleteConsumer(name)
 	return info.NumPending, nil
+}
+
+// storedTTL is how long Stored reuses its answer; the dashboard asks every
+// few seconds and each answer costs a consumer on the stream.
+const storedTTL = 30 * time.Second
+
+type stored struct {
+	events uint64
+	since  time.Time
+	at     time.Time
+}
+
+// Stored counts the events in the stream that match subjects, which the
+// stream's own message count cannot say: it includes the fan-out copies.
+// since is the store time of the oldest message, so the retention reached.
+func (h *Handler) Stored(subjects []string) (events uint64, since time.Time, err error) {
+	if h.js == nil {
+		return 0, time.Time{}, errors.New("no stream")
+	}
+	h.storedMu.Lock()
+	defer h.storedMu.Unlock()
+	if !h.stored.at.IsZero() && time.Since(h.stored.at) < storedTTL {
+		return h.stored.events, h.stored.since, nil
+	}
+	si, err := h.js.StreamInfo(h.stream)
+	if err != nil {
+		return 0, time.Time{}, fmt.Errorf("failed to get stream info: %w", err)
+	}
+	s := stored{at: time.Now()}
+	if si.State.Msgs > 0 {
+		if s.events, err = h.pendingFrom(subjects, si.State.FirstSeq); err != nil {
+			return 0, time.Time{}, err
+		}
+		s.since = si.State.FirstTime
+	}
+	h.stored = s
+	return s.events, s.since, nil
 }
