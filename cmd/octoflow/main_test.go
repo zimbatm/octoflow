@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -65,7 +67,12 @@ func TestHTTPServicesShareAnAddress(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Webhook.ListenAddr, cfg.SSE.ListenAddr, cfg.Dashboard.ListenAddr = ":1", ":1", ":2"
 	cfg.Webhook.AllowUnsigned = true
-	cfg.Dashboard.WebDir = "../../web"
+	// a page of its own: the package builds without web/, so that a change to
+	// the landing page does not rebuild the binary
+	cfg.Dashboard.WebDir = t.TempDir()
+	if err := os.WriteFile(filepath.Join(cfg.Dashboard.WebDir, "index.html"), []byte("<p>test page</p>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	servers, err := httpServers(mustPick(t, "all", cfg), cfg, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +102,7 @@ func TestHTTPServicesShareAnAddress(t *testing.T) {
 	}
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != 200 || !strings.Contains(string(body), "new EventSource(") {
+	if resp.StatusCode != 200 || !strings.Contains(string(body), "test page") {
 		t.Errorf("dashboard / = %d, %d bytes", resp.StatusCode, len(body))
 	}
 }
