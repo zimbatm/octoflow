@@ -177,7 +177,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       octoflow version")
 	fmt.Fprintln(os.Stderr, "  all runs every service in this process; s3 only with S3_BUCKET, public-ingest only with PUBLIC_REPOS")
 	fmt.Fprintln(os.Stderr, "  restore publishes archived events from S3 back into the stream")
-	fmt.Fprintln(os.Stderr, "  wipe deletes the selected events from the stream and, with S3_BUCKET, from the archive")
+	fmt.Fprintln(os.Stderr, "  wipe deletes the selected events from the stream and, with S3_BUCKET, from the archive and the daily files")
 	fmt.Fprintln(os.Stderr, "  compact writes one Parquet file per day from the batch files in S3; without a day, yesterday")
 }
 
