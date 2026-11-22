@@ -9,6 +9,7 @@
 |---|---|---|---|
 | `enable` | bool | `false` | |
 | `package` | package | the flake's package | |
+| `webPackage` | package | the flake's `web` package | directory with the landing page, served by nginx at `/` |
 | `natsUrl` | string | `nats://127.0.0.1:4222` | `NATS_URL` of every unit |
 | `environment` | attrs of string | `{ }` | environment of every unit, for the settings they must share: `NATS_STREAM_MAX_AGE`, `NATS_STREAM_COPY_MAX_AGE`, `NATS_STREAM_MAX_BYTES`; see [configuration](configuration.md) |
 | `nats.enable` | bool | `true` | run `services.nats` with JetStream on 127.0.0.1 and `max_payload` 32 MiB |
@@ -50,7 +51,7 @@ routes, accepts bodies up to 25 MB on `/webhook`, and limits each client address
 20 open streams and 10 requests per second on the SSE routes. `/webhook`
 is not rate limited: GitHub does not retry a refused delivery.
 
-The dashboard is served at `/` from the package's `share/octoflow/web`; it reads
+The landing page is served at `/` from `webPackage`, which is apart from the binary so that a change to the page restarts no service; it reads
 the SSE routes from its own origin. Any other static server can serve the
 same file, opened with `?sse=https://<domain>`.
 

@@ -14,7 +14,6 @@ pkgs.buildGoModule {
       ./cmd
       ./internal
       ./pkg
-      ./web
     ];
   };
   vendorHash = "sha256-Lm40wxm1VUCfYuo4ByvTv/CK3OyI6wbYf2MYNSyujLU=";
@@ -25,10 +24,6 @@ pkgs.buildGoModule {
     runHook preCheck
     go test ./...
     runHook postCheck
-  '';
-  postInstall = ''
-    mkdir -p $out/share/octoflow
-    cp -r web $out/share/octoflow/
   '';
   meta.mainProgram = "octoflow";
 }

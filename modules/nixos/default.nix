@@ -89,6 +89,13 @@ in
       defaultText = lib.literalExpression "octoflow.packages.\${system}.default";
     };
 
+    webPackage = lib.mkOption {
+      type = lib.types.package;
+      default = flake.packages.${pkgs.stdenv.hostPlatform.system}.web;
+      defaultText = lib.literalExpression "octoflow.packages.\${system}.web";
+      description = "Directory with the landing page. It is apart from `package`, so that a change to the page restarts no service.";
+    };
+
     natsUrl = lib.mkOption {
       type = lib.types.str;
       default = "nats://127.0.0.1:4222";
@@ -329,7 +336,7 @@ in
         };
         # the dashboard page; it reads the SSE routes from its own origin
         locations."= /" = {
-          root = "${cfg.package}/share/octoflow/web";
+          root = "${cfg.webPackage}";
           tryFiles = "/index.html =404";
         };
         locations."/" = {
