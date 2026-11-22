@@ -170,3 +170,27 @@ at most every 5 seconds, so the write rate does not follow the event
 rate. Each write is a compare-and-set on the key revision: two writers
 of one key, for example two dispatchers, add up. The SSE server only
 reads, 50 keys per answer, and never creates the bucket.
+
+## Filling the buckets again
+
+The name index, the heads of pull requests and the status counts are
+indexes of the stream, not records. `octoflow reindex` reads every
+primary event of the stream once and writes them again:
+
+```bash
+octoflow reindex --dry-run   # reindex: events=198773 heads=4120 minutes=1438 raised=0
+octoflow reindex
+```
+
+| Bucket | What reindex writes | What it cannot |
+|---|---|---|
+| `octoflow_names` | each name of an organization, repository and sender in the stream | a name whose events are older than the stream keeps |
+| `octoflow_heads` | the head commit of each stored `pull_request` event | the pr copies of CI events that were dispatched before; only later CI events get the link |
+| `octoflow_status` | the events of each minute of the last 24 hours, by store time | the refused deliveries: the receiver does not store them |
+
+Use it after a bucket was deleted, and once after an upgrade from a
+version that did not keep these buckets. It publishes nothing, so it
+can run beside the dispatcher. For the counts it writes a minute only
+when the stream has more events than the bucket says, and it leaves the
+newest two minutes to the dispatcher, so no event is counted twice and
+a second run changes nothing.

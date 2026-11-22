@@ -154,3 +154,32 @@ func TestBucketExpiresItsEntries(t *testing.T) {
 		t.Errorf("entries expire after %v; a reader needs 24 hours and the current one", st.TTL())
 	}
 }
+
+func TestRaiseKeepsTheLargerCount(t *testing.T) {
+	_, js := natstest.Start(t)
+	at := time.Now().Add(-10 * time.Minute).Truncate(time.Minute)
+	c := NewCounter(js, 1)
+	c.Add(Events, at, 5)
+	c.Close()
+
+	raised, err := Raise(js, 1, Events, map[time.Time]int64{
+		at:                       3,
+		at.Add(-time.Minute):     7,
+		at.Add(-30 * time.Hour):  9,
+		at.Add(20 * time.Minute): 9,
+	})
+	if err != nil || raised != 1 {
+		t.Fatalf("raised %d, %v; want 1", raised, err)
+	}
+	s, err := NewReader(js).Read(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	at0 := int(at.Sub(s.Start) / time.Minute)
+	if s.Events[at0] != 5 || s.Events[at0-1] != 7 {
+		t.Errorf("counts %d and %d, want 5 and 7", s.Events[at0], s.Events[at0-1])
+	}
+	if raised, err := Raise(js, 1, Events, map[time.Time]int64{at.Add(-time.Minute): 7}); err != nil || raised != 0 {
+		t.Errorf("a second run raised %d, %v", raised, err)
+	}
+}

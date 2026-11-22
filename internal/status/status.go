@@ -301,3 +301,73 @@ func (r *Reader) Read(now time.Time) (*Series, error) {
 	}
 	return s, nil
 }
+
+// Raise writes counts, one per minute, where they are larger than what the
+// bucket has, so a second run changes nothing and a minute that a Counter
+// already counted is not counted twice. The caller leaves out the newest
+// minutes: a Counter may hold counts for them that it has not written, and
+// would add them on top.
+func Raise(js nats.JetStreamContext, replicas int, kind string, counts map[time.Time]int64) (raised int, err error) {
+	kv, err := openBucket(js, replicas)
+	if err != nil {
+		return 0, err
+	}
+	hours := map[string]*hour{}
+	for at, n := range counts {
+		if age := time.Since(at); age > Minutes*time.Minute || age < 0 {
+			continue
+		}
+		k := key(kind, at)
+		if hours[k] == nil {
+			hours[k] = &hour{}
+		}
+		hours[k][at.UTC().Minute()] += n
+	}
+	for k, want := range hours {
+		n, err := raise(kv, k, want)
+		if err != nil {
+			return raised, fmt.Errorf("key %s: %w", k, err)
+		}
+		raised += n
+	}
+	return raised, nil
+}
+
+func raise(kv nats.KeyValue, k string, want *hour) (int, error) {
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		var h hour
+		var entry nats.KeyValueEntry
+		entry, err = kv.Get(k)
+		if err != nil && !errors.Is(err, nats.ErrKeyNotFound) {
+			return 0, err
+		}
+		found := err == nil
+		if found {
+			_ = json.Unmarshal(entry.Value(), &h)
+		}
+		raised := 0
+		for i, n := range want {
+			if n > h[i] {
+				h[i] = n
+				raised++
+			}
+		}
+		if raised == 0 {
+			return 0, nil
+		}
+		data, _ := json.Marshal(h)
+		if found {
+			_, err = kv.Update(k, data, entry.Revision())
+		} else {
+			_, err = kv.Create(k, data)
+		}
+		if err == nil {
+			return raised, nil
+		}
+		if !conflict(err) {
+			return 0, err
+		}
+	}
+	return 0, err
+}
