@@ -62,6 +62,10 @@ run `nix build`, copy the hash it prints).
    batch files of that day, `{S3_DAILY_PREFIX}/{YYYY-MM-DD}.parquet`,
    sorted and with one row per id, for a public dataset; the batch files
    stay (`internal/compact`); not a service.
+10. `reindex [--dry-run]`: reads the primary events of the stream once and
+    fills the KV buckets `octoflow_names`, `octoflow_heads` and
+    `octoflow_status` again; publishes nothing, safe beside a running
+    dispatcher (`internal/reindex`); not a service.
 
 The webhook, sse and dashboard routes share one server on
 `HTTP_LISTEN_ADDR` (:8080) with `GET /health`; `*_LISTEN_ADDR` moves a
@@ -102,6 +106,7 @@ and `refused.<hour>`, 60 counts each, 48 h TTL).
 - `internal/restore`: archive to stream
 - `internal/wipe`: selected events out of the stream and the archive
 - `internal/compact`: batch files to one file per day
+- `internal/reindex`: the stream back into the dispatcher's KV buckets
 - `internal/sse`: SSE handler, routes and writer
 - `internal/status`: per-minute counts of events (dispatcher) and refused
   deliveries (webhook) in the KV bucket `octoflow_status`, read by `/status`

@@ -68,6 +68,10 @@ teaches its head again, and the copies missed in between are not
 written later. Every other copy is unaffected. A restart loses only the
 cache.
 
+`octoflow reindex` fills this bucket, the name index and the status
+counts again from the events in the stream; see
+[Filling the buckets again](../reference/subjects.md#filling-the-buckets-again).
+
 ## Numeric ids in subjects
 
 Organizations, repositories and users get renamed and transferred. A

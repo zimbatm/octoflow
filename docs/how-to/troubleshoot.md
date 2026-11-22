@@ -105,3 +105,17 @@ and `octoflow_stream_bytes` show the trend. To drop everything at once:
 `nats stream purge GITHUB_EVENTS_RAW -f` keeps the consumers and removes
 the messages. [Architecture](../explanation/architecture.md) says what a
 smaller stream would take.
+
+## A name route answers 404, or the status chart has a gap
+
+The name index and the status counts are filled by the dispatcher as
+events arrive. After an upgrade from a version without them, or after
+their KV bucket was deleted, they start empty. Fill them from the
+stream:
+
+```bash
+octoflow reindex
+```
+
+It needs the same `NATS_*` settings as the services. See
+[Filling the buckets again](../reference/subjects.md#filling-the-buckets-again).

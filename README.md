@@ -84,6 +84,7 @@ one process:
 | `restore --from DATE` | publishes archived events from S3 back into the stream |
 | `wipe --id ...` | deletes selected events from the stream, the batch files and the daily files |
 | `compact` | writes one Parquet file per day from the batch files, for a public dataset |
+| `reindex` | fills the name index, the pull request heads and the status counts again from the events in the stream |
 
 ## Development
 

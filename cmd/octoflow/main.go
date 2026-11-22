@@ -3,6 +3,7 @@
 //	octoflow webhook|dispatcher|s3|sse|dashboard|public-ingest|all|version
 //	octoflow restore --from YYYY-MM-DD ...
 //	octoflow compact [--day YYYY-MM-DD]
+//	octoflow reindex [--dry-run]
 package main
 
 import (
@@ -78,6 +79,8 @@ func main() {
 		os.Exit(runCompact(os.Args[2:]))
 	case "wipe":
 		os.Exit(runWipe(os.Args[2:]))
+	case "reindex":
+		os.Exit(runReindex(os.Args[2:]))
 	}
 	if len(os.Args) != 2 {
 		usage()
@@ -174,11 +177,13 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "       octoflow restore --from YYYY-MM-DD [--to YYYY-MM-DD] [--event a,b] [--repo ID] [--org ID] [--dry-run] [--force]")
 	fmt.Fprintln(os.Stderr, "       octoflow wipe [--id a,b] [--event a,b] [--repo ID] [--org ID] [--user ID] [--pr N] [--issue N] [--from YYYY-MM-DD [--to YYYY-MM-DD]] [--dry-run]")
 	fmt.Fprintln(os.Stderr, "       octoflow compact [--day YYYY-MM-DD | --from YYYY-MM-DD [--to YYYY-MM-DD]] [--dry-run]")
+	fmt.Fprintln(os.Stderr, "       octoflow reindex [--dry-run]")
 	fmt.Fprintln(os.Stderr, "       octoflow version")
 	fmt.Fprintln(os.Stderr, "  all runs every service in this process; s3 only with S3_BUCKET, public-ingest only with PUBLIC_REPOS")
 	fmt.Fprintln(os.Stderr, "  restore publishes archived events from S3 back into the stream")
 	fmt.Fprintln(os.Stderr, "  wipe deletes the selected events from the stream and, with S3_BUCKET, from the archive and the daily files")
 	fmt.Fprintln(os.Stderr, "  compact writes one Parquet file per day from the batch files in S3; without a day, yesterday")
+	fmt.Fprintln(os.Stderr, "  reindex fills the name index, the pull request heads and the status counts again from the events in the stream")
 }
 
 func fatal(msg string, err error) {

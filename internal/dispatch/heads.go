@@ -445,3 +445,17 @@ func decodePRs(value []byte) []int {
 	}
 	return prs
 }
+
+// LearnFrom records the head of the pull request of a stored
+// pull_request event; any other event is ignored. It reports whether the
+// event had a head to record.
+func (h *Heads) LearnFrom(ctx context.Context, event *events.GitHubEvent) (bool, error) {
+	if event.Event != "pull_request" || event.RepositoryID == "" {
+		return false, nil
+	}
+	p := decodeHeadPayload(event.Payload)
+	if p == nil || p.PullRequest == nil || p.PullRequest.Number <= 0 || !isSHA(p.PullRequest.Head.SHA) {
+		return false, nil
+	}
+	return true, h.Learn(ctx, event.RepositoryID, p.PullRequest.Head.SHA, p.PullRequest.Number)
+}
