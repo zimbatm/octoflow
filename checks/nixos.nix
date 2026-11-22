@@ -60,8 +60,10 @@ pkgs.testers.runNixOSTest {
 
     machine.wait_for_unit("nats.service")
     machine.wait_for_open_port(9000)
-    machine.succeed(
-      "curl -sf -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user testkey:testsecret http://127.0.0.1:9000/octoflow"
+    # the port opens before rustfs answers: a PUT in that moment gets an error
+    machine.wait_until_succeeds(
+      "curl -sf -X PUT --aws-sigv4 aws:amz:us-east-1:s3 --user testkey:testsecret http://127.0.0.1:9000/octoflow",
+      timeout=60,
     )
     for unit in ["octoflow-webhook", "octoflow-dispatcher", "octoflow-sse", "octoflow-s3"]:
       machine.wait_for_unit(unit + ".service")
