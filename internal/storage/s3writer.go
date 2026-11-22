@@ -236,7 +236,7 @@ func EncodeParquet(cfg *config.S3Config, eventList []*events.GitHubEvent) ([]byt
 			return nil, fmt.Errorf("failed to write event %s: %w", event.ID, err)
 		}
 	}
-	if err := pw.WriteStop(); err != nil {
+	if err := finishParquet(pw); err != nil {
 		return nil, fmt.Errorf("failed to finish parquet file: %w", err)
 	}
 	return fw.Bytes(), nil
@@ -277,4 +277,41 @@ func (w *S3Writer) objectKey() string {
 func DayPrefix(keyPrefix string, day time.Time) string {
 	day = day.UTC()
 	return fmt.Sprintf("%s/%04d/%02d/%02d/", keyPrefix, day.Year(), day.Month(), day.Day())
+}
+
+// finishParquet ends the file. Before the footer it corrects the page
+// index of the library, which a reader that trusts it (ClickHouse) either
+// refuses or follows to a wrong answer:
+//   - a page's size in the offset index must include the page header, and
+//     the library leaves it out;
+//   - a column without statistics still gets a column index, with empty
+//     bounds, which says that every value is the empty string. Bounds may
+//     be loose, so such a page gets the widest ones: no byte of UTF-8
+//     text is 0xFF.
+func finishParquet(pw *writer.ParquetWriter) error {
+	if err := pw.Flush(true); err != nil {
+		return err
+	}
+	i := 0
+	for _, group := range pw.Footer.RowGroups {
+		for _, chunk := range group.Columns {
+			end := chunk.MetaData.DataPageOffset + chunk.MetaData.TotalCompressedSize
+			pages := pw.OffsetIndexes[i].PageLocations
+			for p, page := range pages {
+				next := end
+				if p+1 < len(pages) {
+					next = pages[p+1].Offset
+				}
+				page.CompressedPageSize = int32(next - page.Offset)
+			}
+			bounds := pw.ColumnIndexes[i]
+			for p := range bounds.MinValues {
+				if bounds.MinValues[p] == nil && bounds.MaxValues[p] == nil {
+					bounds.MinValues[p], bounds.MaxValues[p] = []byte{}, []byte{0xFF}
+				}
+			}
+			i++
+		}
+	}
+	return pw.WriteStop()
 }

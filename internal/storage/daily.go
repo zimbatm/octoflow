@@ -116,7 +116,7 @@ func (w *ParquetWriter) Write(event *events.GitHubEvent) error {
 
 // Close writes the last row group and the footer.
 func (w *ParquetWriter) Close() error {
-	if err := w.pw.WriteStop(); err != nil {
+	if err := finishParquet(w.pw); err != nil {
 		return fmt.Errorf("failed to finish parquet file: %w", err)
 	}
 	return nil
