@@ -68,7 +68,8 @@ this order:
 | `sender_id` | UTF8 | `sender_id` |
 | `metadata` | UTF8 | `metadata` as a JSON object, empty when the event has none |
 
-Files are Snappy-compressed with
+Files are zstd-compressed, with pages of 1 MiB (the first files, of November
+2026, are Snappy with pages of 8 kB; a reader takes both),
 row groups of 10000 and named
 `{S3_KEY_PREFIX}/{YYYY}/{MM}/{DD}/{unix nanoseconds}.parquet`, by the
 upload time in UTC.

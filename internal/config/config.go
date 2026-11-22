@@ -225,7 +225,7 @@ func LoadFromEnv() (*Config, error) {
 			BatchSize:       batchSize,
 			BatchTimeout:    batchTimeout,
 			BatchMaxBytes:   batchMaxBytes,
-			CompressionType: "snappy",
+			CompressionType: "zstd",
 			RowGroupSize:    10000,
 			AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
 			SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),

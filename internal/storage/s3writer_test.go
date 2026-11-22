@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -254,5 +256,36 @@ func TestBatchTimeoutCountsFromTheFirstEvent(t *testing.T) {
 	evs, _ := DecodeParquet(up.keys[0])
 	if len(up.keys) != 1 || len(evs) != 2 {
 		t.Fatalf("uploads = %d, events in the first = %d; want one file with both events", len(up.keys), len(evs))
+	}
+}
+
+// The library's column statistics once put two more copies of every
+// payload into the file, uncompressed: the archive was 3.5 times its input.
+func TestArchiveIsSmallerThanItsPayloads(t *testing.T) {
+	var list []*events.GitHubEvent
+	raw := 0
+	for i := range 300 {
+		payload := fmt.Sprintf(`{"action":"completed","check_run":{"id":%d,"name":"build","url":"https://api.github.com/repos/NixOS/nixpkgs/check-runs/%d","output":{"text":%q}},"repository":{"id":4542716,"full_name":"NixOS/nixpkgs"}}`,
+			i, i, strings.Repeat("evaluation of nixpkgs for x86_64-linux ", 200))
+		e := event(fmt.Sprintf("d%d", i))
+		e.Payload = json.RawMessage(payload)
+		raw += len(payload)
+		list = append(list, e)
+	}
+	for _, codec := range []string{"zstd", "snappy"} {
+		data, err := EncodeParquet(&config.S3Config{CompressionType: codec, RowGroupSize: 10000}, list)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(data) > raw/4 {
+			t.Errorf("%s: %d events with %d bytes of payload made a file of %d bytes, want less than a quarter", codec, len(list), raw, len(data))
+		}
+		if n := rowCount(t, data); n != len(list) {
+			t.Errorf("%s: %d rows read back, want %d", codec, n, len(list))
+		}
+		back, err := DecodeParquet(data)
+		if err != nil || len(back) != len(list) || string(back[7].Payload) != string(list[7].Payload) {
+			t.Errorf("%s: payload did not survive the round trip: %v", codec, err)
+		}
 	}
 }

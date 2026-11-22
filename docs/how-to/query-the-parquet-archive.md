@@ -2,7 +2,7 @@
 
 The s3 service writes one Parquet file per batch under
 `{S3_KEY_PREFIX}/{year}/{month}/{day}/{unix nanoseconds}.parquet`,
-Snappy-compressed, one row per primary event. The columns are listed in
+zstd-compressed, one row per primary event. The columns are listed in
 [Event format](../reference/event-format.md#parquet-row).
 
 ## With DuckDB

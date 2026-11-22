@@ -74,7 +74,7 @@ connection timeout.
 | `S3_BATCH_MAX_BYTES` | `100MiB` | Payload bytes per batch; same suffixes as `NATS_STREAM_MAX_BYTES`. Bounds the memory of the service. |
 
 A quiet repository gets one file per hour at most; a busy one a file per
-1000 events. Fixed: Snappy
+1000 events. Fixed: zstd
 compression, row groups of 10000.
 
 ## SSE server
