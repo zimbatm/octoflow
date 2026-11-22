@@ -15,9 +15,15 @@ browser's `EventSource` reads. No client library is needed.
 | `/events/issue/{repo_id}/{number}` | one issue |
 | `/events/type/{event_type}` | one event type across organizations |
 
-Ids must be numeric. Add `?type=push,pull_request` and `?action=opened`
-to filter, and `?last=N` to replay the last N matching events first
+Ids must be numeric. Add `?last=N` to replay the last N events first
 (default 50, maximum 1000, `0` for none).
+
+Add `?type=push,pull_request` to read only some event types. Most
+events of a busy repository are CI events (`workflow_job`, `check_run`,
+`workflow_run`, `check_suite`), so name the types that you use. `last=N`
+then counts only those types: `?type=pull_request&last=20` replays 20
+pull request events. `?action=opened` drops the other actions after
+that count, so it can show fewer than N.
 
 ## 2. Connect
 
@@ -42,19 +48,54 @@ first; `error` events end the stream when the server lost JetStream.
 
 Each event's `id` is the JetStream sequence. `EventSource` reconnects by
 itself and sends the last id as `Last-Event-ID`; the server resumes after
-it and ignores `?last=` on that request. Nothing to do on your side.
+it and ignores `?since=` and `?last=` on that request. Nothing to do on
+your side.
 
-## 4. Use it from another origin
+A program that is not a browser does the same: keep the last `id`, and
+send it as `Last-Event-ID` on the next start. The resume has no maximum,
+so no event is lost while the stream still holds it.
+
+## 4. Start from a time
+
+`?since=` replays from a time and has no maximum:
+
+| Value | Start |
+|---|---|
+| `since=90m` | 90 minutes ago; `36h` and `2d` work too |
+| `since=2026-11-22T08:00:00Z` | that time, RFC 3339 |
+
+A long range streams a lot of data: an event is 13 to 30 kB. Add
+`?type=` to read only the types that you use.
+
+## 5. Leave the payload out
+
+An event is 13 to 30 kB, nearly all of it the GitHub payload. A page
+that shows only who did what does not need it:
+
+```javascript
+const source = new EventSource('https://events.example.org/events/repo/4542716?since=2d&payload=none');
+source.onmessage = (e) => {
+  const event = JSON.parse(e.data);
+  console.log(`${event.received_at} ${event.event} ${event.action || ''} by ${event.sender}`);
+};
+```
+
+With `?payload=none` an event has no `payload` field and is a few
+hundred bytes. All other fields stay.
+
+## 6. Use it from another origin
 
 The server answers `Access-Control-Allow-Origin: *`, so a page on any
 origin can connect. Behind nginx, keep buffering off and the read timeout
 long; the NixOS module sets this.
 
-## 5. Try it from the shell
+## 7. Try it from the shell
 
 ```bash
 curl -N 'http://localhost:8080/events?last=3'
 curl -N -H 'Last-Event-ID: 42' 'http://localhost:8080/events/org/222'
+curl -N 'http://localhost:8080/events/repo/111?since=2h&type=pull_request'
+curl -N 'http://localhost:8080/events?last=100&payload=none'
 curl http://localhost:8080/stats
 ```
 

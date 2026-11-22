@@ -11,7 +11,7 @@ All routes answer `GET` with `text/event-stream` and
 
 | Route | Subjects read |
 |---|---|
-| `/events` | `org.>`, `global.>` (every event once) |
+| `/events` | `org.*.>`, `global.>` (every event once) |
 | `/events/org/{org_id}` | `org.{org_id}.>` |
 | `/events/repo/{repo_id}` | `repo.{repo_id}.>` |
 | `/events/user/{user_id}` | `user.{user_id}.*` |
@@ -32,15 +32,17 @@ anything else is a 404.
 
 | Parameter | Meaning |
 |---|---|
-| `last=N` | replay the last N events matching the route before new ones; default 50, maximum 1000, `0` for none; ignored when `Last-Event-ID` is sent |
-| `type=a,b` | keep only these GitHub event types |
-| `action=x,y` | keep only these actions |
+| `last=N` | replay the last N events of the route and of `type`, then new ones; default 50, maximum 1000, `0` for none; ignored when `Last-Event-ID` or `since` is sent |
+| `since=T` | replay from a time, then new ones: an RFC 3339 time (`2026-11-22T08:00:00Z`), or a duration back from now (`90m`, `36h`, `2d`); not capped; ignored when `Last-Event-ID` is sent; a bad value is a 400 |
+| `type=a,b` | read only these GitHub event types; see [Event types](#event-types) |
+| `action=x,y` | keep only these actions; a filter after delivery, so `last=N` also counts the events that it drops |
+| `payload=none` | send each event without its `payload` field; see [Payload](#payload). Any other value is a 400 |
 
 ## Headers
 
 | Header | Meaning |
 |---|---|
-| `Last-Event-ID: <sequence>` | resume after this stream sequence; browsers send it on reconnect. An id older than the last 1000 matching events resumes at those 1000 |
+| `Last-Event-ID: <sequence>` | resume after this stream sequence; browsers send it on reconnect. Not capped: every later event of the connection's subjects follows. An id older than the stream starts at its first message |
 
 ## Stream contents
 
@@ -56,8 +58,69 @@ JetStream.
   request gets a 503.
 - Each connection gets its own JetStream consumer, deleted when the
   connection ends and in any case one minute after it goes idle.
-- `last=N` counts only messages that match the route's subjects, found
-  by a binary search over the stream; the stream also holds other
-  subjects between them.
-- Filters apply after replay counting: `last=10&type=push` replays at
-  most 10 events of the route and shows the pushes among them.
+- `last=N` counts only messages that match the subjects of the
+  connection, found by a binary search over the stream; the stream also
+  holds other subjects between them.
+
+## Where the replay starts
+
+The first of these that the request has decides:
+
+| Request has | The stream starts |
+|---|---|
+| `Last-Event-ID` | after that sequence |
+| `since` | at the first event stored at or after that time |
+| `last=N`, or nothing (`last=50`) | at the last N events |
+
+- `last=N` needs a search, so it has a maximum. `Last-Event-ID` and
+  `since` give NATS the start directly and have no maximum: a consumer
+  that was away gets every event that it missed.
+- A long range is a lot of data. An event is 13 to 30 kB, and a busy
+  repository stores 1000 events in 9 minutes. Select the types that
+  you use with `type`, and leave the payload out with `payload=none`.
+- The stream keeps events for `NATS_STREAM_MAX_AGE`, and the fan-out
+  copies for `NATS_STREAM_COPY_MAX_AGE` when set. A start before that
+  begins at the oldest event.
+- `since` compares with the time at which the stream stored the
+  message, which is not always `received_at`: a restore from the
+  archive stores old events again.
+- Write a time with `Z`, or encode the `+` of an offset as `%2B`.
+- A reconnect of `EventSource` sends the same URL and `Last-Event-ID`,
+  so `since` and `last` apply to the first connection only.
+
+## Event types
+
+Every subject ends in the event type. `type=a,b` puts each type in the
+place of the last wildcard of the route's subjects, so NATS does the
+filtering:
+
+| Request | Subjects read |
+|---|---|
+| `/events/repo/4542716` | `repo.4542716.>` |
+| `/events/repo/4542716?type=pull_request,issues` | `repo.4542716.pull_request`, `repo.4542716.issues` |
+| `/events?type=push` | `org.*.push`, `global.push` |
+| `/events/user/2?type=push` | `user.2.push` |
+
+- `last=N` counts only events of these types: `last=10&type=push`
+  replays the last 10 pushes of the route, however many other events
+  are between them.
+- A type must match `[a-z_]+`, and a list has at most 100 types;
+  anything else is a 400 with the reason as text.
+- `/events/type/{event_type}` already reads one type. A `type` list
+  there must contain that type and changes nothing; a list without it
+  is a 400.
+- The `connected` event shows the subjects that the connection reads.
+
+## Payload
+
+An event is 13 to 30 kB, and the GitHub payload is nearly all of it. The
+other fields are a few hundred bytes. `payload=none` sends each event
+without its `payload` field; every other field of the
+[event](event-format.md) stays:
+
+```json
+{"id":"3fa3a85c-6a48-11f0-8793-19d640392600","event":"pull_request","received_at":"2026-10-14T12:00:00.123456Z","repository":"NixOS/nixpkgs","organization":"NixOS","sender":"zimbatm","action":"opened","organization_id":"487568","repository_id":"4542716","sender_id":"2"}
+```
+
+Use it to count, to list or to route events, and with a long `since`
+range. The default sends the stored message unchanged.

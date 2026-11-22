@@ -38,7 +38,7 @@ Every message in the stream, and every SSE `data` field, is one
 | `organization_id` | string | `payload.organization.id`, else `payload.repository.owner.id` | same |
 | `sender` | string | `payload.sender.login` | when the payload has a sender |
 | `sender_id` | string | `payload.sender.id` | same |
-| `payload` | object | the GitHub payload, unchanged | always |
+| `payload` | object | the GitHub payload, unchanged | always; absent over SSE with `?payload=none` |
 | `metadata` | map of strings | public-ingest only: `source` (`events-api` or `gharchive`), `github_event_id`, `created_at` | public-ingest events |
 
 Ids are strings so that 64-bit values survive every JSON parser. Absent

@@ -177,15 +177,86 @@ func TestResumeFromLastEventID(t *testing.T) {
 	}
 }
 
-func TestTypeRouteAndQueryFilter(t *testing.T) {
+func TestTypeRoute(t *testing.T) {
 	f := newFixture(t)
 	got, _ := f.read("/events/type/issues?last=10", "", 1)
 	if want := "d6"; strings.Join(ids(got), " ") != want {
 		t.Errorf("type issues = %v, want %s", ids(got), want)
 	}
-	got, _ = f.read("/events/org/1?last=10&type=issues", "", 1)
+	got, _ = f.read("/events/type/issues?last=10&type=push,issues", "", 1)
 	if want := "d6"; strings.Join(ids(got), " ") != want {
-		t.Errorf("org 1 filtered to issues = %v, want %s", ids(got), want)
+		t.Errorf("type issues, listed in ?type= = %v, want %s", ids(got), want)
+	}
+	if _, code := f.read("/events/type/issues?type=push", "", 0); code != http.StatusBadRequest {
+		t.Errorf("type route with another ?type=: status %d, want 400", code)
+	}
+}
+
+func TestReplayLastNCountsOnlyTheRequestedTypes(t *testing.T) {
+	f := newFixture(t)
+	f.publish("d7", "1", "push")
+	f.publish("d8", "1", "issues")
+	f.publish("d9", "1", "push")
+	f.publish("d10", "1", "push")
+	// the two newest issues have three pushes between and after them
+	for _, path := range []string{"/events/org/1", "/events/repo/7", "/events"} {
+		got, _ := f.read(path+"?last=2&type=issues", "", 2)
+		if want := "d6 d8"; strings.Join(ids(got), " ") != want {
+			t.Errorf("%s last 2 issues = %v, want %s", path, ids(got), want)
+		}
+	}
+	got, _ := f.read("/events/org/1?last=3&type=issues,push,issues", "", 3)
+	if want := "d8 d9 d10"; strings.Join(ids(got), " ") != want {
+		t.Errorf("org 1 last 3 of two types = %v, want %s", ids(got), want)
+	}
+}
+
+func TestActionFiltersAfterTheReplayCount(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	for _, id := range []string{"d7", "d8"} {
+		ev := &events.GitHubEvent{ID: id, Event: "issues", OrganizationID: "1", Action: "closed", Payload: json.RawMessage(`{}`)}
+		if _, err := f.pub.Publish(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.publish("d9", "1", "issues")
+	// the last 2 issues are d8 (closed) and d9 (opened): d7 is not replayed
+	got, _ := f.read("/events/org/1?last=2&type=issues&action=closed", "", 1)
+	if want := "d8"; strings.Join(ids(got), " ") != want {
+		t.Errorf("closed among the last 2 issues = %v, want %s", ids(got), want)
+	}
+}
+
+func TestSelectTypes(t *testing.T) {
+	for _, tc := range []struct {
+		subjects []string
+		types    string
+		want     string
+	}{
+		{[]string{"p.org.1.>"}, "", "p.org.1.>"},
+		{[]string{"p.org.*.>", "p.global.>"}, "push", "p.org.*.push p.global.push"},
+		{[]string{"p.user.2.*"}, "push,issues", "p.user.2.push p.user.2.issues"},
+		{[]string{"p.pr.7.3.>"}, "pull_request", "p.pr.7.3.pull_request"},
+		{[]string{"p.org.*.push", "p.global.push"}, "issues,push", "p.org.*.push p.global.push"},
+	} {
+		got, err := selectTypes(tc.subjects, tc.types)
+		if err != nil || strings.Join(got, " ") != tc.want {
+			t.Errorf("selectTypes(%v, %q) = %v, %v; want %s", tc.subjects, tc.types, got, err, tc.want)
+		}
+	}
+}
+
+func TestABadTypeIsRefused(t *testing.T) {
+	f := newFixture(t)
+	var many []string
+	for i := 0; i <= maxTypes; i++ {
+		many = append(many, "t"+strings.Repeat("a", i))
+	}
+	for _, q := range []string{"type=Push", "type=push,", "type=*", "type=push.%3E", "type=a%20b", "type=" + strings.Join(many, ",")} {
+		if _, code := f.read("/events/org/1?"+q, "", 0); code != http.StatusBadRequest {
+			t.Errorf("?%s: status %d, want 400", q, code)
+		}
 	}
 }
 
@@ -324,14 +395,94 @@ func TestMaxClients(t *testing.T) {
 	}
 }
 
-func TestLastEventIDNeverReplaysPastTheCap(t *testing.T) {
+func TestLastEventIDResumesPastTheCap(t *testing.T) {
 	old := maxLast
 	maxLast = 2
 	t.Cleanup(func() { maxLast = old })
 	f := newFixture(t)
-	got, _ := f.read("/events/org/1", "0", 2)
-	if ids := ids(got); strings.Join(ids, " ") != "d3 d6" {
-		t.Errorf("Last-Event-ID 0 with a cap of 2 replayed %v, want the last two of org 1", ids)
+	got, _ := f.read("/events/org/1?last=1", strconv.FormatUint(f.seqs["d1"], 10), 3)
+	if want := "d2 d3 d6"; strings.Join(ids(got), " ") != want {
+		t.Errorf("resume after d1 with a cap of 2 = %v, want %s", ids(got), want)
+	}
+	got, _ = f.read("/events/org/1?last=4", "", 2)
+	if want := "d3 d6"; strings.Join(ids(got), " ") != want {
+		t.Errorf("last=4 with a cap of 2 = %v, want %s", ids(got), want)
+	}
+}
+
+func TestLastEventIDOlderThanTheStreamStartsAtItsFirstMessage(t *testing.T) {
+	f := newFixture(t)
+	if err := f.js.PurgeStream("P", &nats.StreamPurgeRequest{Sequence: f.seqs["d3"]}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"0", "1"} {
+		got, _ := f.read("/events/org/1", id, 2)
+		if want := "d3 d6"; strings.Join(ids(got), " ") != want {
+			t.Errorf("Last-Event-ID %s on a stream that starts at d3 = %v, want %s", id, ids(got), want)
+		}
+	}
+}
+
+func TestSinceATime(t *testing.T) {
+	f := newFixture(t)
+	time.Sleep(50 * time.Millisecond)
+	between := time.Now().UTC().Format(time.RFC3339Nano)
+	time.Sleep(50 * time.Millisecond)
+	f.publish("d7", "1", "push")
+	f.publish("d8", "1", "issues")
+
+	// last=1 would give d8 only
+	got, _ := f.read("/events/org/1?last=1&since="+between, "", 2)
+	if want := "d7 d8"; strings.Join(ids(got), " ") != want {
+		t.Errorf("since a time before d7 = %v, want %s", ids(got), want)
+	}
+	got, _ = f.read("/events/org/1?type=issues&since="+between, "", 1)
+	if want := "d8"; strings.Join(ids(got), " ") != want {
+		t.Errorf("issues since a time before d7 = %v, want %s", ids(got), want)
+	}
+}
+
+func TestSinceADurationIsNotCapped(t *testing.T) {
+	old := maxLast
+	maxLast = 2
+	t.Cleanup(func() { maxLast = old })
+	f := newFixture(t)
+	for _, since := range []string{"1h", "2d"} {
+		got, _ := f.read("/events/org/1?last=1&since="+since, "", 4)
+		if want := "d1 d2 d3 d6"; strings.Join(ids(got), " ") != want {
+			t.Errorf("since=%s = %v, want %s", since, ids(got), want)
+		}
+	}
+}
+
+func TestLastEventIDComesBeforeSince(t *testing.T) {
+	f := newFixture(t)
+	got, _ := f.read("/events/org/1?since=1h&last=1", strconv.FormatUint(f.seqs["d2"], 10), 2)
+	if want := "d3 d6"; strings.Join(ids(got), " ") != want {
+		t.Errorf("Last-Event-ID of d2 with since=1h = %v, want %s", ids(got), want)
+	}
+}
+
+func TestABadSinceIsRefused(t *testing.T) {
+	f := newFixture(t)
+	for _, since := range []string{"yesterday", "-5m", "0s", "2026-11-22", "99999999d", "5"} {
+		if _, code := f.read("/events/org/1?since="+since, "", 0); code != http.StatusBadRequest {
+			t.Errorf("since=%s: status %d, want 400", since, code)
+		}
+	}
+}
+
+func TestParseSince(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	for in, want := range map[string]time.Time{
+		"90m":                       now.Add(-90 * time.Minute),
+		"2d":                        now.Add(-48 * time.Hour),
+		"2026-11-20T08:30:00Z":      time.Date(2026, 11, 20, 8, 30, 0, 0, time.UTC),
+		"2026-11-20T09:30:00+01:00": time.Date(2026, 11, 20, 8, 30, 0, 0, time.UTC),
+	} {
+		if got, err := parseSince(in, now); err != nil || !got.Equal(want) {
+			t.Errorf("parseSince(%q) = %v, %v; want %v", in, got, err, want)
+		}
 	}
 }
 
@@ -437,5 +588,76 @@ func TestAClientThatLeavesDuringTheReplayLookupIsNotAnError(t *testing.T) {
 	}
 	if n := f.consumerCount(); n != 0 {
 		t.Errorf("%d consumers left on the stream, want 0", n)
+	}
+}
+
+// raw connects and returns the data line of the first event.
+func (f *fixture) raw(path string) string {
+	f.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", f.server.URL+path, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	sc := bufio.NewScanner(resp.Body)
+	inEvent := false
+	for sc.Scan() {
+		if strings.HasPrefix(sc.Text(), "id: ") {
+			inEvent = true
+		}
+		if data, ok := strings.CutPrefix(sc.Text(), "data: "); ok && inEvent {
+			return data
+		}
+	}
+	f.t.Fatalf("%s: no event", path)
+	return ""
+}
+
+func TestPayloadNoneLeavesThePayloadOut(t *testing.T) {
+	f := newFixture(t)
+	ev := &events.GitHubEvent{
+		ID: "d7", Event: "push", Action: "opened", ReceivedAt: time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC),
+		Repository: "o/r", RepositoryID: "7", Organization: "o", OrganizationID: "3", Sender: "s", SenderID: "9",
+		Metadata: map[string]string{"source": "events-api"},
+		Payload:  json.RawMessage(`{"big":"` + strings.Repeat("x", 20000) + `"}`),
+	}
+	if _, err := f.pub.Publish(context.Background(), ev); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := json.Marshal(ev)
+
+	for _, q := range []string{"", "&payload="} {
+		if got := f.raw("/events/org/3?last=1" + q); got != string(stored) {
+			t.Errorf("last=1%s: the event is not the stored message: %d bytes, want %d", q, len(got), len(stored))
+		}
+	}
+
+	got := f.raw("/events/org/3?last=1&payload=none")
+	var fields, want map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &fields); err != nil {
+		t.Fatalf("bad data %q: %v", got, err)
+	}
+	_ = json.Unmarshal(stored, &want)
+	delete(want, "payload")
+	if _, ok := fields["payload"]; ok {
+		t.Errorf("payload=none has a payload field: %s", got)
+	}
+	for k, v := range want {
+		if string(fields[k]) != string(v) {
+			t.Errorf("payload=none: %s = %s, want %s", k, fields[k], v)
+		}
+	}
+	if len(fields) != len(want) || len(want) != 11 {
+		t.Errorf("payload=none has %d fields, the stored event %d without its payload, want 11: %s", len(fields), len(want), got)
+	}
+	if len(got) > 500 {
+		t.Errorf("payload=none is %d bytes", len(got))
+	}
+
+	if _, code := f.read("/events/org/3?payload=small", "", 0); code != http.StatusBadRequest {
+		t.Errorf("payload=small: status %d, want 400", code)
 	}
 }

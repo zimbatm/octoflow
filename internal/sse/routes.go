@@ -2,9 +2,11 @@ package sse
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -42,7 +44,9 @@ func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 	})
 
 	get("/events", func(w http.ResponseWriter, r *http.Request) {
-		serve(h, w, r, "all", natsInternal.PrimarySubjects(prefix))
+		// the primary subjects, with org.> written so that the last token
+		// is the type
+		serve(h, w, r, "all", []string{prefix + ".org.*.>", prefix + ".global.>"})
 	})
 
 	get("/events/org/{org_id}", func(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +111,59 @@ func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 }
 
 func serve(h *Handler, w http.ResponseWriter, r *http.Request, streamID string, subjects []string) {
-	h.Stream(w, r, streamID, subjects, filterFromQuery(r))
+	q := r.URL.Query()
+	subjects, err := selectTypes(subjects, q.Get("type"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	var filter *events.EventFilter
+	if actions := q.Get("action"); actions != "" {
+		filter = &events.EventFilter{Actions: strings.Split(actions, ",")}
+	}
+	h.Stream(w, r, streamID, subjects, filter)
+}
+
+// maxTypes bounds the subjects of one consumer; GitHub has fewer event types.
+const maxTypes = 100
+
+// selectTypes narrows subjects to the comma-separated types: every subject
+// ends in the event type, so a type takes the place of the last token. The
+// server then filters, and a replay counts only these types. A subject
+// that already ends in a type stays if that type is listed.
+func selectTypes(subjects []string, list string) ([]string, error) {
+	if list == "" {
+		return subjects, nil
+	}
+	var types []string
+	for _, t := range strings.Split(list, ",") {
+		if !isEventType(t) {
+			return nil, fmt.Errorf("type: %q is not an event type; give lower-case letters and underscores, with commas between types", t)
+		}
+		// JetStream refuses a consumer that has the same subject twice
+		if !slices.Contains(types, t) {
+			types = append(types, t)
+		}
+	}
+	if len(types) > maxTypes {
+		return nil, fmt.Errorf("type: more than %d event types", maxTypes)
+	}
+	var out []string
+	for _, s := range subjects {
+		i := strings.LastIndexByte(s, '.') + 1
+		switch last := s[i:]; {
+		case last == ">" || last == "*":
+			for _, t := range types {
+				out = append(out, s[:i]+t)
+			}
+		case slices.Contains(types, last):
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("type: this route has one event type, and the list does not have it")
+	}
+	return out, nil
 }
 
 // cors lets browsers on other origins read the streams; the data is
@@ -150,21 +206,4 @@ func isEventType(s string) bool {
 		}
 	}
 	return true
-}
-
-// filterFromQuery reads ?type=a,b and ?action=x,y.
-func filterFromQuery(r *http.Request) *events.EventFilter {
-	types := r.URL.Query().Get("type")
-	actions := r.URL.Query().Get("action")
-	if types == "" && actions == "" {
-		return nil
-	}
-	f := &events.EventFilter{}
-	if types != "" {
-		f.Events = strings.Split(types, ",")
-	}
-	if actions != "" {
-		f.Actions = strings.Split(actions, ",")
-	}
-	return f
 }

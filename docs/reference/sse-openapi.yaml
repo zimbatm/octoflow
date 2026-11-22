@@ -20,12 +20,16 @@ paths:
       operationId: streamAllEvents
       parameters:
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /events/org/{org_id}:
     get:
@@ -34,12 +38,16 @@ paths:
       parameters:
         - $ref: '#/components/parameters/OrgID'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: The id is not numeric
 
@@ -50,12 +58,16 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RepoID'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: The id is not numeric
 
@@ -71,12 +83,16 @@ paths:
             type: string
             pattern: '^\d+$'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: The id is not numeric
 
@@ -88,12 +104,16 @@ paths:
         - $ref: '#/components/parameters/RepoID'
         - $ref: '#/components/parameters/Number'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: An id is not numeric
 
@@ -105,12 +125,16 @@ paths:
         - $ref: '#/components/parameters/RepoID'
         - $ref: '#/components/parameters/Number'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: An id is not numeric
 
@@ -127,11 +151,16 @@ paths:
             pattern: '^[a-z_]+$'
             example: pull_request
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
+        - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: The type is not lower-case letters and underscores
 
@@ -193,39 +222,81 @@ components:
       name: last
       in: query
       description: |
-        Replay the last N matching events before streaming new ones. 0 means
-        none, the default is 50, the maximum 1000. Ignored when
-        Last-Event-ID is sent.
+        Replay the last N events of the route and of `type` before
+        streaming new ones. 0 means none, the default is 50, the maximum
+        1000. Ignored when Last-Event-ID or `since` is sent.
       schema:
         type: integer
         minimum: 0
         maximum: 1000
         default: 50
+    Since:
+      name: since
+      in: query
+      description: |
+        Replay from a time before streaming new ones: an RFC 3339 time, or
+        a duration back from now such as `90m`, `36h` or `2d`. Not capped;
+        a long range streams a lot of data. Ignored when Last-Event-ID is
+        sent.
+      schema:
+        type: string
+      examples:
+        duration:
+          value: "90m"
+        time:
+          value: "2026-11-22T08:00:00Z"
     Type:
       name: type
       in: query
-      description: Comma-separated GitHub event types to keep
+      description: |
+        Comma-separated GitHub event types to read, at most 100. Each type
+        takes the place of the last wildcard of the route's subjects, so
+        `last` counts only events of these types. On
+        `/events/type/{event_type}` the list must contain the type of the
+        route and changes nothing.
       schema:
         type: string
+        pattern: '^[a-z_]+(,[a-z_]+)*$'
         example: "push,pull_request"
     Action:
       name: action
       in: query
-      description: Comma-separated actions to keep
+      description: |
+        Comma-separated actions to keep. A filter after delivery: `last`
+        also counts the events that it drops.
       schema:
         type: string
         example: "opened,closed"
+    Payload:
+      name: payload
+      in: query
+      description: |
+        `none` sends each event without its `payload` field. An event is
+        13 to 30 kB, of which the other fields are a few hundred bytes.
+        Without the parameter the stored event is sent unchanged.
+      schema:
+        type: string
+        enum: [none]
     LastEventID:
       name: Last-Event-ID
       in: header
       description: |
         The `id` of the last event received, a JetStream stream sequence.
-        Browsers send it on reconnect; the stream resumes after it.
+        Browsers send it on reconnect; the stream resumes after it. Not
+        capped: every later event of the subjects follows. An id older
+        than the stream starts at its first message.
       schema:
         type: string
         example: "1842"
 
   responses:
+    BadRequest:
+      description: A query parameter has a bad value; the body says which
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: 'type: "Push" is not an event type; give lower-case letters and underscores, with commas between types'
     SSEStream:
       description: SSE stream established
       headers:
@@ -264,7 +335,7 @@ components:
     GitHubEvent:
       type: object
       description: The stored event, as published by the webhook receiver or public-ingest.
-      required: [id, event, received_at, payload]
+      required: [id, event, received_at]
       properties:
         id:
           type: string
@@ -297,7 +368,7 @@ components:
           type: string
         payload:
           type: object
-          description: The raw GitHub webhook payload
+          description: The raw GitHub webhook payload; absent only with `payload=none`
         metadata:
           type: object
           additionalProperties:
