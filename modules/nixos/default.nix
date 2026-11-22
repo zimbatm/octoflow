@@ -315,6 +315,10 @@ in
     };
 
     services.nginx = lib.mkIf (cfg.domain != null) {
+      # nginx is in front of the receiver, and GitHub does not retry a
+      # refused delivery: a config change reloads nginx, where NixOS would
+      # restart it
+      enableReload = lib.mkDefault true;
       enable = true;
       recommendedProxySettings = true;
       recommendedTlsSettings = true;
