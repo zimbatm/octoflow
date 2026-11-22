@@ -69,6 +69,8 @@ Each unit exposes Prometheus metrics on its own loopback port (9180 to
 exposes the NATS server itself on 9185: connections, slow consumers,
 memory, and JetStream storage against its limit. Scrape them with your
 Prometheus or `services.prometheus.scrapeConfigs`.
+`services.octoflow.metricsTargets` has the addresses that exist with your
+configuration, for a scrape configuration written in Nix.
 
 ## 6. Run the VM test
 

@@ -131,6 +131,12 @@ in
       description = "Prometheus /metrics address per service; an empty string disables it. `nats` is prometheus-nats-exporter in front of the local server's monitoring port.";
     };
 
+    metricsTargets = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      readOnly = true;
+      description = "The entries of `metricsListen` that something listens on with this configuration: no `s3` without a bucket, no `public-ingest` without repositories, no `nats` without the local server, and none that is set to an empty string. Build a scrape configuration from this.";
+    };
+
     domain = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
@@ -226,6 +232,17 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    services.octoflow.metricsTargets = lib.filterAttrs (
+      unit: addr:
+      addr != ""
+      && {
+        s3 = cfg.s3.bucket != null;
+        public-ingest = cfg.publicIngest.repos != [ ];
+        nats = cfg.nats.enable;
+      }
+      .${unit} or true
+    ) cfg.metricsListen;
+
     services.nats = lib.mkIf cfg.nats.enable {
       enable = true;
       jetstream = true;
@@ -287,7 +304,9 @@ in
         environment = {
           SSE_LISTEN_ADDR = cfg.sse.listen;
           SITE_TITLE = cfg.site.title;
-          SITE_STREAMS = lib.concatStringsSep "," (lib.mapAttrsToList (label: path: "${label}=${path}") cfg.site.streams);
+          SITE_STREAMS = lib.concatStringsSep "," (
+            lib.mapAttrsToList (label: path: "${label}=${path}") cfg.site.streams
+          );
         }
         // lib.optionalAttrs (cfg.site.intro != null) { SITE_INTRO = cfg.site.intro; };
       };
