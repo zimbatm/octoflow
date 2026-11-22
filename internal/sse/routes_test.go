@@ -2,8 +2,10 @@ package sse
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -411,5 +413,29 @@ func TestSiteRoute(t *testing.T) {
 	}
 	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
 		t.Error("no CORS header: the page may be on another origin")
+	}
+}
+
+func TestAClientThatLeavesDuringTheReplayLookupIsNotAnError(t *testing.T) {
+	f := newFixture(t)
+	var logged bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	defer slog.SetDefault(old)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	req := httptest.NewRequest("GET", "/events/org/1?last=1", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	f.server.Config.Handler.ServeHTTP(rec, req)
+
+	if strings.Contains(logged.String(), "level=ERROR") {
+		t.Errorf("a cancelled request was logged as an error:\n%s", logged.String())
+	}
+	if strings.Contains(rec.Body.String(), "event: error") {
+		t.Errorf("an error event was written to a client that left:\n%s", rec.Body.String())
+	}
+	if n := f.consumerCount(); n != 0 {
+		t.Errorf("%d consumers left on the stream, want 0", n)
 	}
 }

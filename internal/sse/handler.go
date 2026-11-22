@@ -104,6 +104,11 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string
 	}()
 	sub, err := h.subscribe(ctx, subjects, r.Header.Get("Last-Event-ID"), lastCount)
 	if err != nil {
+		// the client left, or the server shuts down, while the replay start was
+		// looked up: nothing failed, and nobody is there to read an error
+		if ctx.Err() != nil {
+			return
+		}
 		slog.Error("Failed to create NATS subscription", "error", err, "subjects", subjects, "stream_id", streamID)
 		_ = sw.WriteEvent("", "error", []byte(`{"error":"Failed to create subscription"}`))
 		return
