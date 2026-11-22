@@ -226,6 +226,8 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
             <div class="opts">
                 <label>Replay the last <input type="number" id="opt-last" min="0" max="1000" value="10"> events</label>
                 <label>Only types <input type="text" id="opt-type" placeholder="push,issues" spellcheck="false"></label>
+                <label>Or all since <input type="text" id="opt-since" placeholder="2h" spellcheck="false"></label>
+                <label><input type="checkbox" id="opt-slim"> Without the payload</label>
             </div>
             <div class="url">
                 <label class="sr" for="url">Stream URL</label>
@@ -241,9 +243,11 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
             <pre id="code"></pre>
             <ul>
                 <li>Each message is one JSON object: <code>event</code>, <code>action</code>, <code>repository</code>, <code>sender</code> and the full GitHub <code>payload</code>.</li>
-                <li><code>last=N</code> replays the last N events of the stream before new ones, 1000 at most.</li>
+                <li><code>last=N</code> replays the last N events before new ones, 1000 at most. With <code>type=</code> it counts only those types.</li>
+                <li><code>since=2h</code> or <code>since=2026-11-22T10:00:00Z</code> replays all events from that time, with no limit.</li>
+                <li><code>payload=none</code> sends the routing fields only: some hundred bytes for each event, not 13 to 30 kB.</li>
                 <li>A browser that reconnects continues where it stopped. Other clients send <code>Last-Event-ID</code> with the last <code>id</code> they read.</li>
-                <li>The paths use numeric GitHub ids, so a renamed repository keeps its stream.</li>
+                <li>A path takes a name or the numeric GitHub id. The id stays the same when a repository gets a new name.</li>
             </ul>
         </div>
     </aside>
@@ -283,13 +287,16 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
                 <thead><tr><th>Route</th><th>Events</th></tr></thead>
                 <tbody>
                     <tr><td><code>/events</code></td><td>everything, one time each</td></tr>
-                    <tr><td><code>/events/org/{org_id}</code></td><td>one organization</td></tr>
-                    <tr><td><code>/events/repo/{repo_id}</code></td><td>one repository</td></tr>
-                    <tr><td><code>/events/user/{user_id}</code></td><td>events that involve one user: sender, author, assignee, reviewer</td></tr>
-                    <tr><td><code>/events/pr/{repo_id}/{number}</code></td><td>one pull request and its reviews</td></tr>
-                    <tr><td><code>/events/issue/{repo_id}/{number}</code></td><td>one issue and its comments</td></tr>
+                    <tr><td><code>/events/org/{login}</code></td><td>one organization</td></tr>
+                    <tr><td><code>/events/repo/{owner}/{name}</code></td><td>one repository</td></tr>
+                    <tr><td><code>/events/user/{login}</code></td><td>events that involve one user: sender, author, assignee, reviewer</td></tr>
+                    <tr><td><code>/events/pr/{owner}/{name}/{number}</code></td><td>one pull request, its reviews and the CI events of its head commit</td></tr>
+                    <tr><td><code>/events/issue/{owner}/{name}/{number}</code></td><td>one issue and its comments</td></tr>
+                    <tr><td colspan="2">Each of these also takes the numeric GitHub id in place of the name, for example <code>/events/repo/4542716</code>.</td></tr>
                     <tr><td><code>/events/type/{event_type}</code></td><td>one GitHub event type, for example <code>push</code></td></tr>
                     <tr><td><code>?last=N</code></td><td>replay before the live events; default 50, <code>0</code> for none</td></tr>
+                    <tr><td><code>?since=2h</code></td><td>replay from a time (a duration, or RFC 3339), with no limit</td></tr>
+                    <tr><td><code>?payload=none</code></td><td>events without their <code>payload</code></td></tr>
                     <tr><td><code>?type=a,b</code> <code>?action=x,y</code></td><td>keep only these event types or actions</td></tr>
                     <tr><td><code>/stats</code></td><td>JSON: stored events and open streams</td></tr>
                     <tr><td><code>/status</code></td><td>JSON: events and refused deliveries for each minute of the last 24 hours</td></tr>
@@ -589,10 +596,13 @@ function detail(ev, d) {
 
 function streamUrl() {
     const q = [];
+    const since = $('opt-since').value.trim();
     const last = $('opt-last').value.trim();
-    if (last !== '') q.push('last=' + Math.max(0, Math.min(1000, Math.floor(Number(last)) || 0)));
+    if (/^(\d+[smhd]|\d{4}-\d\d-\d\dT[\d:.]+(Z|[+-]\d\d:\d\d))$/.test(since)) q.push('since=' + encodeURIComponent(since));
+    else if (last !== '') q.push('last=' + Math.max(0, Math.min(1000, Math.floor(Number(last)) || 0)));
     const types = $('opt-type').value.split(',').map(s => s.trim()).filter(t => /^[a-z_]+$/.test(t)).join(',');
     if (types) q.push('type=' + types);
+    if ($('opt-slim').checked) q.push('payload=none');
     return SSE_BASE + scope.path + (q.length ? '?' + q.join('&') : '');
 }
 
@@ -636,39 +646,48 @@ function copy(text, button) {
 
 // ---- finder: a name becomes a stream ----------------------------------------
 
-async function github(path) {
-    const r = await fetch('https://api.github.com' + path);
-    if (r.status === 403 || r.status === 429) throw new Error('GitHub limits name lookups from your address. Wait some minutes, or select an event in the list.');
-    if (!r.ok) throw new Error(`GitHub does not know “${path.replace(/^\/(repos|users)\//, '')}”.`);
-    return r.json();
+// the server knows a name once it saw an event with it; a 404 says it did not
+async function known(path) {
+    const stop = new AbortController();
+    try {
+        const r = await fetch(SSE_BASE + path + '?last=0', { signal: stop.signal });
+        return r.ok;
+    } catch (e) {
+        return false;
+    } finally {
+        stop.abort();
+    }
 }
 
 async function find(text) {
     const q = text.trim();
     if (!q) return EVERYTHING;
+    const unseen = what => new Error(`This server has no event of ${what} yet. It knows a name after the first event with it.`);
     let m;
     if ((m = q.match(/^type:([a-z_]+)$/))) return { kind: 'type', label: `type ${m[1]}`, path: `/events/type/${m[1]}` };
     if ((m = q.match(/^@([\w-]+)$/))) {
-        const u = await github(`/users/${m[1]}`);
-        return { kind: 'user', label: '@' + u.login, path: `/events/user/${u.id}` };
+        const path = `/events/user/${m[1]}`;
+        if (!await known(path)) throw unseen('@' + m[1]);
+        return { kind: 'user', label: '@' + m[1], path };
     }
-    if ((m = q.match(/^(?:https:\/\/github\.com\/)?([\w.-]+\/[\w.-]+?)(?:#|\/pull\/|\/issues\/)(\d+)$/))) {
-        const repo = await github(`/repos/${m[1]}`);
-        const item = await github(`/repos/${m[1]}/issues/${m[2]}`);
-        const kind = item.pull_request ? 'pr' : 'issue';
-        return { kind, label: `${repo.full_name}#${m[2]}`, path: `/events/${kind}/${repo.id}/${m[2]}` };
+    if ((m = q.match(/^(?:https:\/\/github\.com\/)?([\w.-]+\/[\w.-]+?)(#|\/pull\/|\/issues\/)(\d+)$/))) {
+        // a bare #number does not say which of the two it is
+        const kind = m[2] === '/issues/' ? 'issue' : 'pr';
+        const path = `/events/${kind}/${m[1]}/${m[3]}`;
+        if (!await known(path)) throw unseen(m[1]);
+        return { kind, label: `${m[1]}#${m[3]}`, path };
     }
     if ((m = q.match(/^(?:https:\/\/github\.com\/)?([\w.-]+\/[\w.-]+)$/))) {
-        const repo = await github(`/repos/${m[1]}`);
-        return { kind: 'repo', label: repo.full_name, path: `/events/repo/${repo.id}` };
+        const path = `/events/repo/${m[1]}`;
+        if (!await known(path)) throw unseen(m[1]);
+        return { kind: 'repo', label: m[1], path };
     }
     if (/^[\w-]+$/.test(q)) {
-        const who = await github(`/users/${q}`);    // answers for organizations too
-        return who.type === 'Organization'
-            ? { kind: 'org', label: who.login, path: `/events/org/${who.id}` }
-            : { kind: 'user', label: '@' + who.login, path: `/events/user/${who.id}` };
+        if (await known(`/events/org/${q}`)) return { kind: 'org', label: q, path: `/events/org/${q}` };
+        if (await known(`/events/user/${q}`)) return { kind: 'user', label: '@' + q, path: `/events/user/${q}` };
+        throw unseen(q);
     }
-    throw new Error('Write owner/repo, owner/repo#number, @user, an organization name, or type:push.');
+    throw new Error('Write owner/repo, owner/repo#number (a pull request; for an issue, paste its URL), @user, an organization name, or type:push.');
 }
 
 // the path decides what is fetched, so it must be one of the routes
@@ -878,6 +897,8 @@ $('pause').addEventListener('click', () => { if (paused) openId = null; setPause
 $('banner-btn').addEventListener('click', () => { openId = null; setPaused(false); });
 $('opt-last').addEventListener('input', renderUse);
 $('opt-type').addEventListener('input', renderUse);
+$('opt-since').addEventListener('input', renderUse);
+$('opt-slim').addEventListener('change', renderUse);
 $('copy-url').addEventListener('click', e => copy($('url').value, e.target));
 $('copy-code').addEventListener('click', e => copy($('code').textContent, e.target));
 document.querySelectorAll('.tabs [role=tab]').forEach(tab => tab.addEventListener('click', () => {
