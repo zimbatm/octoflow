@@ -274,6 +274,11 @@ in
           # the socket unit could not take it any more
           requires = unit.requires ++ [ "octoflow-webhook.socket" ];
           after = unit.after ++ [ "octoflow-webhook.socket" ];
+          # NixOS stops a changed unit before the switch and starts it after,
+          # and it stops the socket of a socket-activated unit with it: the
+          # port would be closed for those seconds. A restart after the
+          # switch keeps the socket open.
+          stopIfChanged = false;
         };
 
       octoflow-dispatcher = mkService {
@@ -287,7 +292,9 @@ in
         environment = {
           SSE_LISTEN_ADDR = cfg.sse.listen;
           SITE_TITLE = cfg.site.title;
-          SITE_STREAMS = lib.concatStringsSep "," (lib.mapAttrsToList (label: path: "${label}=${path}") cfg.site.streams);
+          SITE_STREAMS = lib.concatStringsSep "," (
+            lib.mapAttrsToList (label: path: "${label}=${path}") cfg.site.streams
+          );
         }
         // lib.optionalAttrs (cfg.site.intro != null) { SITE_INTRO = cfg.site.intro; };
       };
