@@ -12,15 +12,40 @@ All routes answer `GET` with `text/event-stream` and
 | Route | Subjects read |
 |---|---|
 | `/events` | `org.*.>`, `global.>` (every event once) |
-| `/events/org/{org_id}` | `org.{org_id}.>` |
-| `/events/repo/{repo_id}` | `repo.{repo_id}.>` |
-| `/events/user/{user_id}` | `user.{user_id}.*` |
-| `/events/pr/{repo_id}/{number}` | `pr.{repo_id}.{number}.>` |
-| `/events/issue/{repo_id}/{number}` | `issue.{repo_id}.{number}.>` |
+| `/events/org/{org_id}`, `/events/org/{login}` | `org.{org_id}.>` |
+| `/events/repo/{repo_id}`, `/events/repo/{owner}/{name}` | `repo.{repo_id}.>` |
+| `/events/user/{user_id}`, `/events/user/{login}` | `user.{user_id}.*` |
+| `/events/pr/{repo_id}/{number}`, `/events/pr/{owner}/{name}/{number}` | `pr.{repo_id}.{number}.>` |
+| `/events/issue/{repo_id}/{number}`, `/events/issue/{owner}/{name}/{number}` | `issue.{repo_id}.{number}.>` |
 | `/events/type/{event_type}` | `org.*.{event_type}`, `global.{event_type}` |
 
-Path ids must match `[0-9]+`, `{event_type}` must match `[a-z_]+`;
-anything else is a 404.
+Path ids and numbers must match `[0-9]+`, `{event_type}` must match
+`[a-z_]+`; anything else is a 404.
+
+## Names in a route
+
+`{login}`, `{owner}` and `{name}` are GitHub names:
+`/events/repo/NixOS/nixpkgs` is `/events/repo/4542716`. The server reads
+the id from the [name index](subjects.md#the-name-index) and then serves
+the id route, so `stream_id` and `subjects` in the `connected` event
+carry the id. Only the id goes into a subject, never the name.
+
+| Rule | Detail |
+|---|---|
+| Known names | Octoflow knows a name from the first event with that name that the dispatcher routed. It does not ask GitHub. |
+| Case | Ignored, as on GitHub: `nixos/NixPkgs` is `NixOS/nixpkgs`. |
+| Characters | Letters, digits, `-`, `_` and `.`, at most 100 per name. A name with another character is not in the index. |
+| Digits only | `/events/org/{x}` and `/events/user/{x}` read an `{x}` of digits only as an id. A login of digits only has no name route; use its id. |
+| Bots | A login such as `dependabot[bot]` is not indexed; use the id. |
+| Rename | The new name works from the first event that carries it. The old name stays in the index and points to the same id, until an event gives that name to another id. |
+| Delay | The server keeps an answer for one minute. A name that moved to another id is followed after that time at the latest. A new name works at once. |
+
+| Status | Body | When |
+|---|---|---|
+| 404 | `{"error":"octoflow has no event of this repository; it only knows the names it has seen in an event"}` (or `organization`, `user`) | the name is not in the index, or is not a valid name |
+| 503 | `{"error":"the name index does not answer; use the numeric id"}` | the server could not read the index |
+
+The id routes do not use the index.
 
 | Route | Answers |
 |---|---|

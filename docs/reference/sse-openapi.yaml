@@ -8,6 +8,10 @@ info:
     `event` field is the GitHub event type, whose `id` is the JetStream
     stream sequence, and whose `data` is a `GitHubEvent` JSON document.
 
+    The org, repo, user, pr and issue routes take a numeric GitHub id or
+    a GitHub name. A name is resolved from the name index, which holds
+    the names of the events that Octoflow has routed.
+
 servers:
   - url: http://localhost:8080
     description: Local SSE server
@@ -49,7 +53,9 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
-          description: The id is not numeric
+          $ref: '#/components/responses/UnknownName'
+        '503':
+          $ref: '#/components/responses/NoIndex'
 
   /events/repo/{repo_id}:
     get:
@@ -71,17 +77,14 @@ paths:
         '404':
           description: The id is not numeric
 
-  /events/user/{user_id}:
+  /events/repo/{owner}/{name}:
     get:
-      summary: Events involving one user, as sender, author, assignee or reviewer
-      operationId: streamUserEvents
+      summary: Events of one repository, by name
+      description: The repository by name. See the parameter `owner`.
+      operationId: streamRepoEventsByName
       parameters:
-        - name: user_id
-          in: path
-          required: true
-          schema:
-            type: string
-            pattern: '^\d+$'
+        - $ref: '#/components/parameters/Owner'
+        - $ref: '#/components/parameters/Name'
         - $ref: '#/components/parameters/Last'
         - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
@@ -94,7 +97,38 @@ paths:
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
-          description: The id is not numeric
+          $ref: '#/components/responses/UnknownName'
+        '503':
+          $ref: '#/components/responses/NoIndex'
+
+  /events/user/{user_id}:
+    get:
+      summary: Events involving one user, as sender, author, assignee or reviewer
+      operationId: streamUserEvents
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: Numeric user id, or the login. Digits only is an id.
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9._-]{1,100}$'
+          examples:
+            id:
+              value: "3248"
+            login:
+              value: zimbatm
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+        '404':
+          $ref: '#/components/responses/UnknownName'
+        '503':
+          $ref: '#/components/responses/NoIndex'
 
   /events/pr/{repo_id}/{number}:
     get:
@@ -117,6 +151,27 @@ paths:
         '404':
           description: An id is not numeric
 
+  /events/pr/{owner}/{name}/{number}:
+    get:
+      summary: Events of one pull request, by repository name
+      description: The repository by name. See the parameter `owner`.
+      operationId: streamPREventsByName
+      parameters:
+        - $ref: '#/components/parameters/Owner'
+        - $ref: '#/components/parameters/Name'
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+        '404':
+          $ref: '#/components/responses/UnknownName'
+        '503':
+          $ref: '#/components/responses/NoIndex'
+
   /events/issue/{repo_id}/{number}:
     get:
       summary: Events of one issue
@@ -137,6 +192,27 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           description: An id is not numeric
+
+  /events/issue/{owner}/{name}/{number}:
+    get:
+      summary: Events of one issue, by repository name
+      description: The repository by name. See the parameter `owner`.
+      operationId: streamIssueEventsByName
+      parameters:
+        - $ref: '#/components/parameters/Owner'
+        - $ref: '#/components/parameters/Name'
+        - $ref: '#/components/parameters/Number'
+        - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
+        - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/LastEventID'
+      responses:
+        '200':
+          $ref: '#/components/responses/SSEStream'
+        '404':
+          $ref: '#/components/responses/UnknownName'
+        '503':
+          $ref: '#/components/responses/NoIndex'
 
   /events/type/{event_type}:
     get:
@@ -196,11 +272,35 @@ components:
       name: org_id
       in: path
       required: true
-      description: Numeric organization id
+      description: Numeric organization id, or the login. Digits only is an id.
       schema:
         type: string
-        pattern: '^\d+$'
-        example: "487568"
+        pattern: '^[A-Za-z0-9._-]{1,100}$'
+      examples:
+        id:
+          value: "487568"
+        login:
+          value: NixOS
+    Owner:
+      name: owner
+      in: path
+      required: true
+      description: |
+        Login of the repository owner, in any case. Octoflow knows a
+        repository name once it has routed an event with it.
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9._-]{1,100}$'
+        example: NixOS
+    Name:
+      name: name
+      in: path
+      required: true
+      description: Repository name, in any case
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9._-]{1,100}$'
+        example: nixpkgs
     RepoID:
       name: repo_id
       in: path
@@ -297,6 +397,24 @@ components:
           schema:
             type: string
             example: 'type: "Push" is not an event type; give lower-case letters and underscores, with commas between types'
+    UnknownName:
+      description: |
+        The name is not in the name index, or is not a valid GitHub name.
+        Octoflow only knows the names it has seen in an event.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: octoflow has no event of this repository; it only knows the names it has seen in an event
+    NoIndex:
+      description: The server could not read the name index. The id routes still work.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error: the name index does not answer; use the numeric id
     SSEStream:
       description: SSE stream established
       headers:
@@ -332,6 +450,13 @@ components:
                 data: {"id":"3fa3a85c-6a48-11f0-8793-19d640392600","event":"pull_request","action":"opened","received_at":"2026-10-14T12:00:00Z","repository":"NixOS/nixpkgs","repository_id":"4542716","organization":"NixOS","organization_id":"487568","sender":"zimbatm","sender_id":"2","payload":{}}
 
   schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
     GitHubEvent:
       type: object
       description: The stored event, as published by the webhook receiver or public-ingest.

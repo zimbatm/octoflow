@@ -34,11 +34,15 @@ run `nix build`, copy the hash it prints).
    primary subjects, replies 200 only after JetStream acked. Refuses to
    start without `WEBHOOK_SECRET` unless `WEBHOOK_ALLOW_UNSIGNED=true`.
 2. `dispatcher`: consumes the primary subjects and republishes each event
-   to repo, user, pr and issue subjects (`internal/dispatch`).
+   to repo, user, pr and issue subjects (`internal/dispatch`); writes the
+   name index (`internal/names`).
 3. `s3`: batches primary events into Parquet files in S3; acks only after
    the upload (`internal/storage`).
 4. `sse`: streams events to browsers; `Last-Event-ID` is the
-   JetStream sequence (`internal/sse`).
+   JetStream sequence (`internal/sse`). Routes take an id or a name:
+   `/events/repo/{repo_id}` and `/events/repo/{owner}/{name}`, the same
+   for `org`, `user`, `pr`, `issue`; a name is resolved from the index
+   and only the id reaches a subject.
 5. `dashboard`: serves `web/`; the page finds the SSE server
    from its own origin or `?sse=`.
 6. `public-ingest`: reads the GitHub Events API and GH Archive for
@@ -70,12 +74,18 @@ message id for 24 hours (copies use `<id>@<subject>`). A consumer of the
 whole stream sees each event once per copy; consume the primary subjects
 (`internal/nats.PrimarySubjects`) unless you want the copies.
 
+KV buckets: `octoflow_public_ingest` (progress of public-ingest) and
+`octoflow_names` (the name index: `org.{login}`, `repo.{owner}.{name}`,
+`user.{login}` in lower case, value the id; see
+docs/reference/subjects.md).
+
 ## Packages
 
 - `internal/config`: all settings, from the environment only
 - `internal/nats`: connection, publisher, stream and consumer helpers
 - `internal/natstest`: embedded nats-server for tests
 - `internal/dispatch`: fan-out subjects and republishing
+- `internal/names`: the name index, its keys, writer and resolver
 - `internal/webhook`: HTTP server and GitHub webhook handler
 - `internal/storage`: Parquet batching behind an Uploader interface, and the reader
 - `internal/restore`: archive to stream
@@ -87,7 +97,7 @@ whole stream sees each event once per copy; consume the primary subjects
 - `examples/`: two consumers, built with `go build ./...`
 
 Every package but `internal/metrics` has tests. The NATS, dispatch,
-SSE and public-ingest tests run against an embedded server; the storage
+names, SSE and public-ingest tests run against an embedded server; the storage
 tests use a fake uploader. `checks/nixos.nix` runs the whole pipeline in
 a VM.
 

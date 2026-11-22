@@ -16,6 +16,7 @@ import (
 
 	"github.com/nats-io/nats.go"
 	"github.com/zimbatm/octoflow/internal/metrics"
+	"github.com/zimbatm/octoflow/internal/names"
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
@@ -33,6 +34,8 @@ type Handler struct {
 	// MaxClients bounds the open streams, each of which holds a JetStream
 	// consumer; 0 is unlimited. Beyond it a request gets a 503.
 	MaxClients int
+	// Names resolves the names in a path; nil knows none
+	Names *names.Resolver
 	// Site is served at /site for the landing page; nil serves null
 	Site    any
 	clients atomic.Int64

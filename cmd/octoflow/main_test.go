@@ -73,7 +73,9 @@ func TestHTTPServicesShareAnAddress(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cfg.Dashboard.WebDir, "index.html"), []byte("<p>test page</p>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	servers, err := httpServers(mustPick(t, "all", cfg), cfg, nil)
+	// the SSE routes open the name index
+	_, js := natstest.Start(t)
+	servers, err := httpServers(mustPick(t, "all", cfg), cfg, js)
 	if err != nil {
 		t.Fatal(err)
 	}

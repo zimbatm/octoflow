@@ -7,7 +7,13 @@ the `nats.go` client; the same subjects work from any NATS client.
 
 Every subject carries numeric GitHub ids, so renames do not break it.
 Find the id with `curl -s https://api.github.com/repos/OWNER/REPO | jq .id`
-(or `/orgs/NAME`, `/users/LOGIN`).
+(or `/orgs/NAME`, `/users/LOGIN`). For a name that Octoflow has seen in
+an event, the [name index](../reference/subjects.md#the-name-index) has
+the id too, with the key in lower case:
+
+```bash
+nats kv get octoflow_names repo.nixos.nixpkgs --raw
+```
 
 | You want | Subscribe to |
 |---|---|
