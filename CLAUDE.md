@@ -56,8 +56,12 @@ run `nix build`, copy the hash it prints).
 7. `restore --from DATE`: publishes archived events from S3 back into the
    stream (`internal/restore`); not a service, exits when done.
 8. `wipe --id ...`: securely deletes selected events and their copies
-   from the stream and rewrites the archive files that hold them
-   (`internal/wipe`); not a service.
+   from the stream and rewrites the batch files
+   and the daily files that hold them (`internal/wipe`); not a service.
+9. `compact [--day DATE]`: writes one Parquet file per UTC day from the
+   batch files of that day, `{S3_DAILY_PREFIX}/{YYYY-MM-DD}.parquet`,
+   sorted and with one row per id, for a public dataset; the batch files
+   stay (`internal/compact`); not a service.
 
 The webhook, sse and dashboard routes share one server on
 `HTTP_LISTEN_ADDR` (:8080) with `GET /health`; `*_LISTEN_ADDR` moves a
@@ -94,9 +98,10 @@ and `refused.<hour>`, 60 counts each, 48 h TTL).
 - `internal/dispatch`: fan-out subjects and republishing
 - `internal/names`: the name index, its keys, writer and resolver
 - `internal/webhook`: HTTP server and GitHub webhook handler
-- `internal/storage`: Parquet batching behind an Uploader interface, and the reader
+- `internal/storage`: Parquet batching behind an Uploader interface, the reader, and the stream reader and writer of the daily files
 - `internal/restore`: archive to stream
 - `internal/wipe`: selected events out of the stream and the archive
+- `internal/compact`: batch files to one file per day
 - `internal/sse`: SSE handler, routes and writer
 - `internal/status`: per-minute counts of events (dispatcher) and refused
   deliveries (webhook) in the KV bucket `octoflow_status`, read by `/status`
@@ -107,7 +112,8 @@ and `refused.<hour>`, 60 counts each, 48 h TTL).
 
 Every package but `internal/metrics` has tests. The NATS, dispatch,
 names, SSE, status and public-ingest tests run against an embedded server; the storage
-tests use a fake uploader. `checks/nixos.nix` runs the whole pipeline in
+tests use a fake uploader, the compact and wipe tests the store of
+`internal/storage/storagetest`. `checks/nixos.nix` runs the whole pipeline in
 a VM.
 
 ## Environment variables
@@ -118,6 +124,7 @@ WEBHOOK_ALLOWED_ORGS=a,b      # optional allow-list
 S3_BUCKET=...                 # s3 only
 S3_ENDPOINT=http://...        # R2, rustfs; unset for AWS
 S3_BATCH_TIMEOUT=1h           # archive lag; S3_BATCH_SIZE=1000, S3_BATCH_MAX_BYTES=100MiB
+S3_DAILY_PREFIX=              # compact and wipe: prefix of the daily files, default {S3_KEY_PREFIX}-daily
 AWS_REGION / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY   # unset keys: AWS credential chain
 NATS_URL=nats://localhost:4222
 NATS_USERNAME / NATS_PASSWORD / NATS_TOKEN / NATS_NKEY_SEED

@@ -1,7 +1,8 @@
 # Wipe events
 
 `octoflow wipe` deletes selected events from the stream, fan-out copies
-included, and from the archive. Use it when a delivery turns out to
+included, and from the archive: the batch files and the daily files of
+`octoflow compact`. Use it when a delivery turns out to
 carry something that must not stay: a secret pasted in a comment, a
 security advisory, a payload from an event type the hook should not
 have sent.
@@ -17,6 +18,10 @@ s3 settings. On a NixOS host run it as root with the s3 unit's
 environment file sourced, so the archive is wiped in the same run;
 without `S3_BUCKET` it wipes the stream and says the archive was
 skipped.
+
+Give it the `S3_KEY_PREFIX` and the `S3_DAILY_PREFIX` of the s3 service
+and of the compaction, if they are not the defaults. With other values
+the command finds no files and has nothing to wipe.
 
 ## 2. Select the events
 
@@ -41,6 +46,7 @@ octoflow wipe --repo 4542716 --pr 450123 --dry-run
 ```
 wipe stream: scanned=38120 matched=14 events=2 deleted=0
 wipe archive: files=48 rows=38012 matched=2 rewritten=0 removed=0
+wipe daily: files=31 rows=4920311 matched=2 rewritten=0 removed=0
 ```
 
 `matched` on the stream counts messages: a primary event and each of
@@ -49,6 +55,11 @@ its copies. `events` is the number of distinct deliveries. Without
 bucket; with it only the days `--from` to `--to` plus one are read,
 because a file is named after its upload time and holds events received
 up to a day before.
+
+`wipe daily` counts the daily files. A daily file holds the events of
+its own day, so with `--from` only the files of `--from` to `--to` are
+read. `files=0` is correct when you never ran `octoflow compact`, and a
+wrong `S3_DAILY_PREFIX` otherwise.
 
 ## 4. Wipe
 
@@ -59,6 +70,7 @@ octoflow wipe --repo 4542716 --pr 450123
 ```
 wipe stream: scanned=38120 matched=14 events=2 deleted=14
 wipe archive: files=48 rows=38012 matched=2 rewritten=1 removed=0
+wipe daily: files=31 rows=4920311 matched=2 rewritten=1 removed=0
 ```
 
 The stream deletion is JetStream's secure delete: the server overwrites
@@ -66,6 +78,16 @@ the message on disk. An archive file that held a selected event is
 written back without it, under the same key; a file left without rows
 is removed. Both happen in place, so if the bucket keeps versions, the
 old version still exists and has to be purged in the bucket.
+
+A daily file that held a selected event is written back the same way,
+after the batch files and from its own rows. The command then reads it
+once more. If a selected event is still in it, the command fails with
+exit status 1 and names the file: a compaction that ran at the same
+time put the file back from batch files it read before the wipe. Run
+the wipe again. `rewritten` and `removed` count only the files that are
+clean. If the daily files are public, see
+[Publish a public dataset](publish-a-public-dataset.md#4-know-what-a-wipe-does)
+for the copies outside the bucket.
 
 The command stops at the first error and prints the counts so far;
 rerun it to continue, the already deleted events no longer match.
@@ -75,7 +97,7 @@ rerun it to continue, the already deleted events no longer match.
 - The stream remembers the delivery id for 24 hours, so a GitHub
   "Redeliver" inside that window is refused as a duplicate. After it,
   a redelivery stores the event again.
-- `octoflow restore` republishes whatever is still in the archive. Wipe
+- `octoflow restore` republishes whatever is still in the batch files. Wipe
   the archive in the same run, or before a restore.
 - The journal holds no payloads; at `LOG_LEVEL=debug` it has the
   delivery id, event type, repository and sender of every event.

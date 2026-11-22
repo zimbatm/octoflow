@@ -67,7 +67,8 @@ connection timeout.
 | `S3_BUCKET` | none | Required by the s3 service; `octoflow all` skips the service without it. |
 | `AWS_REGION` | `us-east-1` | Hetzner Object Storage wants its location such as `fsn1`, R2 `auto`. |
 | `S3_ENDPOINT` | AWS for the region | `http://` or `https://` URL of an S3-compatible store. |
-| `S3_KEY_PREFIX` | `github-events` | First path element of every object key. |
+| `S3_KEY_PREFIX` | `github-events` | First path element of every batch file key. |
+| `S3_DAILY_PREFIX` | `{S3_KEY_PREFIX}-daily` | First path element of the daily files that `octoflow compact` writes and `octoflow wipe` cleans. It must not be inside `S3_KEY_PREFIX`, nor `S3_KEY_PREFIX` inside it; both commands refuse to start otherwise. The s3 service does not read it. |
 | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | none | Static credentials. When the key id is unset, the AWS chain is tried: environment, shared credentials file, instance role. |
 | `S3_BATCH_TIMEOUT` | `1h` | A batch closes this long after its first event. It is the archive lag, and the time events wait unacked in the stream; `AckWait` of the consumer is this plus two minutes. |
 | `S3_BATCH_SIZE` | `1000` | Events per batch; a full batch closes at once. |
