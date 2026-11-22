@@ -23,8 +23,46 @@ Written by the dispatcher, one copy per subject.
 |---|---|
 | `github.events.repo.{repo_id}.{event_type}` | event with a repository |
 | `github.events.user.{user_id}.{event_type}` | involved user: sender, PR or issue author, assignees, requested reviewers, comment and review authors, team members; none for the types in `DISPATCH_USER_SKIP_EVENTS` |
-| `github.events.pr.{repo_id}.{number}.{event_type}` | `pull_request`, `pull_request_review` and `pull_request_review_comment` event |
+| `github.events.pr.{repo_id}.{number}.{event_type}` | `pull_request`, `pull_request_review` and `pull_request_review_comment` event; `check_run`, `check_suite`, `workflow_run`, `workflow_job` and `status` event per pull request that the dispatcher finds for it, see [CI events](#ci-events-on-the-pr-subject) |
 | `github.events.issue.{repo_id}.{number}.{event_type}` | `issues` and `issue_comment` event |
+
+## CI events on the pr subject
+
+A CI event names a commit, not a pull request. The dispatcher finds the
+pull requests in this order:
+
+| Source | Used when |
+|---|---|
+| `pull_requests` in `check_run`, `check_suite` or `workflow_run` | the list is not empty; GitHub leaves it empty for a pull request from a fork. An entry whose `base.repo.id` is another repository is ignored |
+| the bucket `octoflow_heads`, by head commit | the list is empty or absent |
+
+The head commit is `head_sha` of `check_run`, `check_suite`,
+`workflow_run` and `workflow_job`, and `sha` of `status`.
+
+| Bucket `octoflow_heads` | |
+|---|---|
+| Key | `{repo_id}.{head_sha}` |
+| Value | pull request numbers, comma-separated, for example `42,57`; at most 16 |
+| Written by | the dispatcher, on every `pull_request` event of any action, from `pull_request.head.sha` and `pull_request.number`, before the copies of that event |
+| Expiry | `NATS_STREAM_MAX_AGE` after the last write of the key, 30 days when the stream has no max age; applied to an existing bucket on start. A `pull_request` event rewrites a key older than half of that |
+| Storage | file, `NATS_STREAM_REPLICAS` replicas |
+
+Each dispatcher process keeps the last 10000 answers in memory: a hit
+for 10 minutes, a miss for 10 seconds. A burst of CI events on one
+commit costs one read of the bucket.
+
+Limits:
+
+- A CI event dispatched before the first `pull_request` event of its
+  head commit gets no pr copy, and none is added later. See [Delivery
+  guarantees](../explanation/delivery-guarantees.md#ci-events-and-the-head-of-a-pull-request).
+- The link is by commit only. A push to a branch whose tip is also the
+  head of a pull request gives CI events that land on that pull request.
+- A CI event whose head commit is not the head of the pull request is
+  not linked. A workflow started by `pull_request_target` runs on the
+  base branch and reports that commit.
+- When the bucket does not answer, the event is dispatched without the
+  pr copy and the dispatcher logs a warning.
 
 Every fan-out subject ends in the event type. Useful wildcards:
 
@@ -78,7 +116,8 @@ window.
 
 Progress of public-ingest is not a consumer but the KV bucket
 `octoflow_public_ingest`, keys `events-api.<repo_id>` and
-`gharchive.next_hour`.
+`gharchive.next_hour`. The dispatcher keeps the heads of pull requests
+in the KV bucket `octoflow_heads`, see [CI events](#ci-events-on-the-pr-subject).
 
 ## The name index
 

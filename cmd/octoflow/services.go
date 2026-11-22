@@ -53,10 +53,14 @@ func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamCon
 	if err != nil {
 		return fmt.Errorf("failed to open name index: %w", err)
 	}
-	index := nameIndex.NewWriter(kv)
+	heads, err := dispatch.OpenHeads(js, cfg.NATS.StreamReplicas, cfg.NATS.StreamMaxAge)
+	if err != nil {
+		return fmt.Errorf("failed to open the heads bucket: %w", err)
+	}
+	heads.Names = nameIndex.NewWriter(kv)
 
 	pullLoop(ctx, cfg, js, consumer, func(msg *nats.Msg) {
-		_, err := dispatch.Dispatch(ctx, publisher, index, cfg.NATS.SubjectPrefix, msg.Data, cfg.Dispatch.SkipUserEvents)
+		_, err := heads.Dispatch(ctx, publisher, cfg.NATS.SubjectPrefix, msg.Data, cfg.Dispatch.SkipUserEvents)
 		switch {
 		case errors.Is(err, dispatch.ErrUndecodable):
 			metrics.DispatchedEvents.WithLabelValues("undecodable").Inc()

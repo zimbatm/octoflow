@@ -46,6 +46,28 @@ cost for a cosmetic gain. If the stream still grows too large,
 `NATS_STREAM_COPY_MAX_AGE` gives the copies a shorter life than the
 primary events.
 
+## The dispatcher keeps one map
+
+The fan-out of most events needs only the event. CI events are the
+exception: a `check_run`, `check_suite`, `workflow_run`, `workflow_job`
+or `status` event names a commit, and its `pull_requests` list is empty
+for a pull request from a fork, which is most pull requests of a public
+repository. "Is this pull request green?" could not be answered from
+the pr subject.
+
+So the dispatcher remembers the head commit of every pull request it
+sees, in the KV bucket `octoflow_heads`, and copies a CI event to the
+pull requests that have its commit as their head. A bounded cache in
+front of the bucket holds hits and misses, because CI events are over
+90% of the traffic of a busy repository and come in bursts per commit.
+
+The map is an index, not a record. If the bucket is lost, the
+dispatcher creates it again on start and nothing fails: CI events get
+no pr copy until the next `pull_request` event of each pull request
+teaches its head again, and the copies missed in between are not
+written later. Every other copy is unaffected. A restart loses only the
+cache.
+
 ## Numeric ids in subjects
 
 Organizations, repositories and users get renamed and transferred. A

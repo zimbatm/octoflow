@@ -133,6 +133,13 @@ paths:
   /events/pr/{repo_id}/{number}:
     get:
       summary: Events of one pull request
+      description: |
+        The `pull_request`, `pull_request_review` and
+        `pull_request_review_comment` events of the pull request, and the
+        `check_run`, `check_suite`, `workflow_run`, `workflow_job` and
+        `status` events of its head commits. The link from a CI event to
+        its pull request is best-effort: an event dispatched before the
+        first `pull_request` event of its commit is not on this route.
       operationId: streamPREvents
       parameters:
         - $ref: '#/components/parameters/RepoID'

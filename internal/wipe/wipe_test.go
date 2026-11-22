@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/zimbatm/octoflow/internal/config"
 	"github.com/zimbatm/octoflow/internal/dispatch"
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
@@ -204,5 +205,54 @@ func TestArchiveRewritesAndRemovesFiles(t *testing.T) {
 	}
 	if len(left) != 1 || left[0].ID != "b" || string(left[0].Payload) == "" {
 		t.Errorf("rewritten file holds %+v, want only b with its payload", left)
+	}
+}
+
+func TestStreamDeletesTheCICopyOnThePRSubject(t *testing.T) {
+	_, js := natstest.Start(t)
+	cfg := &config.NATSConfig{SubjectPrefix: "p", StreamName: "P", StreamReplicas: 1, StreamMaxAge: time.Hour}
+	if err := natsInternal.EnsureStream(js, cfg); err != nil {
+		t.Fatal(err)
+	}
+	pub := natsInternal.NewPublisher(js, cfg)
+	heads, err := dispatch.OpenHeads(js, 1, time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	const sha = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	opened := pr("d1", "7", 42, "1", now)
+	opened.Payload = json.RawMessage(`{"pull_request":{"number":42,"head":{"sha":"` + sha + `"},"user":{"id":1}},"sender":{"id":1}}`)
+	check := &events.GitHubEvent{ID: "c1", Event: "check_run", RepositoryID: "7", OrganizationID: "9", SenderID: "1",
+		ReceivedAt: now, Payload: json.RawMessage(`{"check_run":{"head_sha":"` + sha + `","pull_requests":[]},"sender":{"id":1}}`)}
+	for _, ev := range []*events.GitHubEvent{opened, check} {
+		if _, err := pub.Publish(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := json.Marshal(ev)
+		if _, err := heads.Dispatch(ctx, pub, "p", data, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := js.GetLastMsg("P", "p.pr.7.42.check_run"); err != nil {
+		t.Fatalf("the check_run has no copy on the pr subject: %v", err)
+	}
+
+	// a CI event does not name its pull request, so --pr does not select it
+	st, err := Stream(ctx, js, "P", "p", Options{RepoID: "7", PR: 42}, true)
+	if err != nil || st.Matched != 4 || st.Events != 1 {
+		t.Errorf("by pr: %+v, %v, want the 4 messages of the pull_request event", st, err)
+	}
+
+	st, err = Stream(ctx, js, "P", "p", Options{IDs: []string{"c1"}}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Matched != 4 || st.Events != 1 || st.Deleted != 4 {
+		t.Errorf("by id: %+v, want the primary and the repo, user and pr copies", st)
+	}
+	if _, err := js.GetLastMsg("P", "p.pr.7.42.check_run"); !errors.Is(err, nats.ErrMsgNotFound) {
+		t.Errorf("the copy on the pr subject is still there: %v", err)
 	}
 }
