@@ -53,6 +53,14 @@ let
     UMask = "0077";
   };
 
+  s3Environment = {
+    S3_BUCKET = cfg.s3.bucket;
+    AWS_REGION = cfg.s3.region;
+    S3_KEY_PREFIX = cfg.s3.keyPrefix;
+  }
+  // lib.optionalAttrs (cfg.s3.endpoint != null) { S3_ENDPOINT = cfg.s3.endpoint; }
+  // lib.optionalAttrs (cfg.s3.daily.prefix != null) { S3_DAILY_PREFIX = cfg.s3.daily.prefix; };
+
   mkService =
     {
       description,
@@ -209,6 +217,24 @@ in
         default = null;
         description = "systemd EnvironmentFile with AWS_ACCESS_KEY_ID= and AWS_SECRET_ACCESS_KEY=.";
       };
+      daily = {
+        enable = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = "Write one Parquet file per day from the batch files of the day before, with `octoflow compact` on a timer. This is the file to offer as a public dataset; the module makes nothing public.";
+        };
+        prefix = lib.mkOption {
+          type = lib.types.nullOr lib.types.str;
+          default = null;
+          example = "nixpkgs-events";
+          description = "First path element of the daily files, `S3_DAILY_PREFIX`. The default is `keyPrefix` with `-daily` appended. `octoflow wipe` must run with the same value, or it does not find the daily files.";
+        };
+        onCalendar = lib.mkOption {
+          type = lib.types.str;
+          default = "*-*-* 03:00:00 UTC";
+          description = "When the compaction runs, as a systemd calendar expression. The s3 service uploads the last events of a day up to `S3_BATCH_TIMEOUT` after midnight UTC; run after that.";
+        };
+      };
     };
 
     publicIngest = {
@@ -232,6 +258,13 @@ in
   };
 
   config = lib.mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = cfg.s3.daily.enable -> cfg.s3.bucket != null;
+        message = "services.octoflow.s3.daily.enable needs services.octoflow.s3.bucket";
+      }
+    ];
+
     services.octoflow.metricsTargets = lib.filterAttrs (
       unit: addr:
       addr != ""
@@ -320,13 +353,24 @@ in
       octoflow-s3 = mkService {
         description = "octoflow S3 parquet writer";
         service = "s3";
-        environment = {
-          S3_BUCKET = cfg.s3.bucket;
-          AWS_REGION = cfg.s3.region;
-          S3_KEY_PREFIX = cfg.s3.keyPrefix;
-        }
-        // lib.optionalAttrs (cfg.s3.endpoint != null) { S3_ENDPOINT = cfg.s3.endpoint; };
+        environment = s3Environment;
         inherit (cfg.s3) environmentFile;
+      };
+    }
+    // lib.optionalAttrs (cfg.s3.bucket != null && cfg.s3.daily.enable) {
+      # not from mkService: it reads only the bucket, so it does not wait
+      # for nats, and a run that failed waits for the next timer
+      octoflow-compact = {
+        description = "octoflow daily Parquet file";
+        wants = [ "network-online.target" ];
+        after = [ "network-online.target" ];
+        environment = common // s3Environment;
+        serviceConfig = hardening // {
+          Type = "oneshot";
+          Restart = "no";
+          ExecStart = "${lib.getExe cfg.package} compact";
+          EnvironmentFile = lib.optional (cfg.s3.environmentFile != null) cfg.s3.environmentFile;
+        };
       };
     }
     // lib.optionalAttrs (cfg.publicIngest.repos != [ ]) {
@@ -335,6 +379,16 @@ in
         service = "public-ingest";
         environment.PUBLIC_REPOS = lib.concatStringsSep "," cfg.publicIngest.repos;
         inherit (cfg.publicIngest) environmentFile;
+      };
+    };
+
+    systemd.timers.octoflow-compact = lib.mkIf (cfg.s3.bucket != null && cfg.s3.daily.enable) {
+      description = "octoflow daily Parquet file";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = cfg.s3.daily.onCalendar;
+        # a host that was down at that time compacts when it is back
+        Persistent = true;
       };
     };
 

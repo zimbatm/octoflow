@@ -27,6 +27,7 @@ pkgs.testers.runNixOSTest {
         pkgs.openssl
         pkgs.natscli
         pkgs.jq
+        pkgs.duckdb
         flake.packages.${pkgs.stdenv.hostPlatform.system}.default
       ];
 
@@ -54,6 +55,7 @@ pkgs.testers.runNixOSTest {
           bucket = "octoflow";
           endpoint = "http://127.0.0.1:9000";
           region = "us-east-1";
+          daily.enable = true;
           environmentFile = pkgs.writeText "s3.env" ''
             AWS_ACCESS_KEY_ID=testkey
             AWS_SECRET_ACCESS_KEY=testsecret
@@ -176,16 +178,40 @@ pkgs.testers.runNixOSTest {
         ).strip()
         assert out == "1", f"{route} after restore: {out} events"
 
-    with subtest("a wipe removes the event from the stream and the archive"):
-      s3env = (
-        "S3_BUCKET=octoflow S3_ENDPOINT=http://127.0.0.1:9000 AWS_REGION=us-east-1 "
-        "AWS_ACCESS_KEY_ID=testkey AWS_SECRET_ACCESS_KEY=testsecret "
-      )
+    s3env = (
+      "S3_BUCKET=octoflow S3_ENDPOINT=http://127.0.0.1:9000 AWS_REGION=us-east-1 "
+      "AWS_ACCESS_KEY_ID=testkey AWS_SECRET_ACCESS_KEY=testsecret "
+    )
+    daily = "http://127.0.0.1:9000/octoflow/github-events-daily/$(date -u +%F).parquet"
+    get = "curl -sf --aws-sigv4 aws:amz:us-east-1:s3 --user testkey:testsecret "
+
+    with subtest("the compaction unit runs in its sandbox; yesterday has no events"):
+      machine.succeed("systemctl is-active octoflow-compact.timer")
+      machine.succeed("systemctl start octoflow-compact.service")
+      machine.succeed("journalctl -u octoflow-compact | grep 'rows=0 events=0 duplicates=0 daily=none'")
+
+    with subtest("compact writes one file for the day, which restore does not read"):
+      out = machine.succeed(s3env + "octoflow compact --day $(date -u +%F)")
+      assert "files=1 rows=1 events=1 duplicates=0 daily=written" in out, out
+      machine.succeed(get + "-o /tmp/daily.parquet " + daily)
+      rows = machine.succeed(
+        "duckdb -csv -noheader -c \"SELECT count(*), any_value(id), any_value(payload ->> '$.pull_request.number') "
+        "FROM '/tmp/daily.parquet'\""
+      ).strip()
+      assert rows == "1,vm-1,7", rows
+      out = machine.succeed(s3env + "octoflow restore --from $(date -u +%F) --dry-run")
+      assert "files=1 rows=1" in out, out
+
+    with subtest("a wipe removes the event from the stream, the archive and the daily file"):
       out = machine.succeed(s3env + "octoflow wipe --repo 111 --pr 7 --dry-run")
       assert "events=1 deleted=0" in out, out
       assert "wipe archive: files=1 rows=1 matched=1 rewritten=0 removed=0" in out, out
+      assert "wipe daily: files=1 rows=1 matched=1 rewritten=0 removed=0" in out, out
       out = machine.succeed(s3env + "octoflow wipe --repo 111 --pr 7")
-      assert "events=1" in out and "deleted=0" not in out and "removed=1" in out, out
+      assert "events=1" in out and "deleted=0" not in out, out
+      assert "wipe archive: files=1 rows=1 matched=1 rewritten=0 removed=1" in out, out
+      assert "wipe daily: files=1 rows=1 matched=1 rewritten=0 removed=1" in out, out
+      machine.fail(get + "-o /dev/null " + daily)
       machine.succeed("nats --server nats://127.0.0.1:4222 stream info GITHUB_EVENTS_RAW --json | jq -e '.state.messages == 0'")
       out = machine.succeed(s3env + "octoflow restore --from $(date -u +%F) --dry-run")
       assert "files=0 rows=0" in out, out
