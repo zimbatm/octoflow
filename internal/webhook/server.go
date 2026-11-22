@@ -3,14 +3,18 @@ package webhook
 import (
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/zimbatm/octoflow/internal/config"
 )
 
 // Routes registers the receiver on mux: deliveries on POST /webhook, and a
-// help page on GET /webhook for whoever opens the URL in a browser.
-func Routes(mux *http.ServeMux, cfg *config.WebhookConfig, publisher Publisher) {
-	mux.Handle("POST /webhook", NewHandler(cfg, publisher))
+// help page on GET /webhook for whoever opens the URL in a browser. refused,
+// when not nil, is told the time of each delivery that lost its event.
+func Routes(mux *http.ServeMux, cfg *config.WebhookConfig, publisher Publisher, refused func(at time.Time)) {
+	h := NewHandler(cfg, publisher)
+	h.Refused = refused
+	mux.Handle("POST /webhook", h)
 	mux.HandleFunc("GET /webhook", helpHandler)
 }
 

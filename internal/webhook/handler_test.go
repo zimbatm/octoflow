@@ -271,7 +271,7 @@ func TestHandlerRejections(t *testing.T) {
 			}
 			published := make(chanPublisher, 1)
 			mux := http.NewServeMux()
-			Routes(mux, &tt.cfg, published)
+			Routes(mux, &tt.cfg, published, nil)
 			handler := mux
 
 			method := tt.method
@@ -364,5 +364,51 @@ func TestBodyIsNotReadBeforeTheSignatureLooksRight(t *testing.T) {
 		if rec.Code != http.StatusUnauthorized {
 			t.Errorf("signature %q: status %d, want 401", sig, rec.Code)
 		}
+	}
+}
+
+func TestHandlerReportsOnlyTheDeliveriesThatLoseAnEvent(t *testing.T) {
+	post := func(h *Handler, body string, headers map[string]string) int {
+		req := httptest.NewRequest("POST", "/webhook", bytes.NewBufferString(body))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	delivery := map[string]string{"X-GitHub-Event": "push", "X-GitHub-Delivery": "d", "Content-Type": "application/json"}
+	cfg := &config.WebhookConfig{MaxPayloadSize: 64, RequestTimeout: 200 * time.Millisecond}
+
+	tests := []struct {
+		name      string
+		publisher Publisher
+		body      string
+		headers   map[string]string
+		code      int
+		refused   int
+	}{
+		{"stored", make(chanPublisher, 1), `{"action":"opened"}`, delivery, http.StatusOK, 0},
+		{"publish_error", failingPublisher{}, `{"action":"opened"}`, delivery, http.StatusServiceUnavailable, 1},
+		{"invalid_payload", make(chanPublisher, 1), `not json`, delivery, http.StatusBadRequest, 1},
+		{"too_large", make(chanPublisher, 1), `{"a":"` + strings.Repeat("x", 100) + `"}`, delivery, http.StatusRequestEntityTooLarge, 1},
+		{"missing_headers", make(chanPublisher, 1), `{}`, map[string]string{"Content-Type": "application/json"}, http.StatusBadRequest, 0},
+		{"bad_content_type", make(chanPublisher, 1), `{}`, map[string]string{"X-GitHub-Event": "push", "X-GitHub-Delivery": "d"}, http.StatusBadRequest, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := NewHandler(cfg, tt.publisher)
+			var refused []time.Time
+			h.Refused = func(at time.Time) { refused = append(refused, at) }
+			if code := post(h, tt.body, tt.headers); code != tt.code {
+				t.Errorf("status %d, want %d", code, tt.code)
+			}
+			if len(refused) != tt.refused {
+				t.Fatalf("reported %d refused deliveries, want %d", len(refused), tt.refused)
+			}
+			if tt.refused > 0 && time.Since(refused[0]) > time.Minute {
+				t.Errorf("refused at %v, want now", refused[0])
+			}
+		})
 	}
 }

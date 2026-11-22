@@ -47,6 +47,8 @@ run `nix build`, copy the hash it prints).
    `/events/repo/{repo_id}` and `/events/repo/{owner}/{name}`, the same
    for `org`, `user`, `pr`, `issue`; a name is resolved from the index
    and only the id reaches a subject.
+   Also `GET /stats`, `/site` and `/status` (per-minute counts for the
+   landing page).
 5. `dashboard`: serves `web/`; the page finds the SSE server
    from its own origin or `?sse=`.
 6. `public-ingest`: reads the GitHub Events API and GH Archive for
@@ -78,10 +80,11 @@ message id for 24 hours (copies use `<id>@<subject>`). A consumer of the
 whole stream sees each event once per copy; consume the primary subjects
 (`internal/nats.PrimarySubjects`) unless you want the copies.
 
-KV buckets: `octoflow_public_ingest` (progress of public-ingest) and
+KV buckets: `octoflow_public_ingest` (progress of public-ingest),
 `octoflow_names` (the name index: `org.{login}`, `repo.{owner}.{name}`,
 `user.{login}` in lower case, value the id; see
-docs/reference/subjects.md).
+docs/reference/subjects.md) and `octoflow_status` (keys `events.<hour>`
+and `refused.<hour>`, 60 counts each, 48 h TTL).
 
 ## Packages
 
@@ -95,13 +98,15 @@ docs/reference/subjects.md).
 - `internal/restore`: archive to stream
 - `internal/wipe`: selected events out of the stream and the archive
 - `internal/sse`: SSE handler, routes and writer
+- `internal/status`: per-minute counts of events (dispatcher) and refused
+  deliveries (webhook) in the KV bucket `octoflow_status`, read by `/status`
 - `internal/ghevents`: Events API client, GH Archive reader, conversion
 - `internal/publicingest`: polling loops and progress for public-ingest
 - `pkg/events`: the event type, payload parsing and entity extraction
 - `examples/`: two consumers, built with `go build ./...`
 
 Every package but `internal/metrics` has tests. The NATS, dispatch,
-names, SSE and public-ingest tests run against an embedded server; the storage
+names, SSE, status and public-ingest tests run against an embedded server; the storage
 tests use a fake uploader. `checks/nixos.nix` runs the whole pipeline in
 a VM.
 

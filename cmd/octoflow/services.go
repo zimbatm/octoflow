@@ -21,6 +21,7 @@ import (
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
 	"github.com/zimbatm/octoflow/internal/publicingest"
 	"github.com/zimbatm/octoflow/internal/sse"
+	"github.com/zimbatm/octoflow/internal/status"
 	"github.com/zimbatm/octoflow/internal/storage"
 	"github.com/zimbatm/octoflow/internal/webhook"
 	"github.com/zimbatm/octoflow/pkg/events"
@@ -33,8 +34,11 @@ func webhookRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.Serve
 		}
 		slog.Warn("WEBHOOK_SECRET is not set; unsigned deliveries are accepted")
 	}
-	webhook.Routes(mux, &cfg.Webhook, natsInternal.NewPublisher(js, &cfg.NATS))
-	return nil, nil
+	counter := status.NewCounter(js, cfg.NATS.StreamReplicas)
+	webhook.Routes(mux, &cfg.Webhook, natsInternal.NewPublisher(js, &cfg.NATS), func(at time.Time) {
+		counter.Add(status.Refused, at, 1)
+	})
+	return counter.Close, nil
 }
 
 func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {
@@ -58,12 +62,16 @@ func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamCon
 		return fmt.Errorf("failed to open the heads bucket: %w", err)
 	}
 	heads.Names = nameIndex.NewWriter(kv)
+	// the dispatcher sees each primary event once, whoever published it
+	counter := status.NewCounter(js, cfg.NATS.StreamReplicas)
+	defer counter.Close()
 
 	pullLoop(ctx, cfg, js, consumer, func(msg *nats.Msg) {
 		_, err := heads.Dispatch(ctx, publisher, cfg.NATS.SubjectPrefix, msg.Data, cfg.Dispatch.SkipUserEvents)
 		switch {
 		case errors.Is(err, dispatch.ErrUndecodable):
 			metrics.DispatchedEvents.WithLabelValues("undecodable").Inc()
+			countEvent(counter, msg)
 			terminate(msg, "Dropping undecodable message", err)
 		case err != nil:
 			metrics.DispatchedEvents.WithLabelValues("error").Inc()
@@ -71,10 +79,23 @@ func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamCon
 			natsInternal.AckOrNak(msg, err)
 		default:
 			metrics.DispatchedEvents.WithLabelValues("ok").Inc()
+			countEvent(counter, msg)
 			natsInternal.AckOrNak(msg, nil)
 		}
 	})
 	return nil
+}
+
+// countEvent counts a message under the minute the stream stored it, not
+// the minute it was dispatched: a backlog then lands where it belongs. It
+// is called once per message, when its handling is final, so a nak and
+// its redelivery count once.
+func countEvent(counter *status.Counter, msg *nats.Msg) {
+	meta, err := msg.Metadata()
+	if err != nil {
+		return
+	}
+	counter.Add(status.Events, meta.Timestamp, 1)
 }
 
 func runS3(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) error {

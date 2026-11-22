@@ -258,6 +258,26 @@ paths:
               schema:
                 $ref: '#/components/schemas/Stats'
 
+  /status:
+    get:
+      summary: Events and refused deliveries per minute for the last 24 hours
+      operationId: getStatus
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
+        '503':
+          description: The counts cannot be read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+
   /health:
     get:
       summary: Liveness
@@ -524,3 +544,59 @@ components:
         total_clients: 3
         events_stored: 181204
         stored_since: "2026-11-14T15:31:24Z"
+
+    Status:
+      type: object
+      required: [now, start, step, events, refused, events_1h, events_24h, refused_1h, refused_24h]
+      properties:
+        now:
+          type: string
+          format: date-time
+          description: When the answer was computed; it is reused for 10 seconds
+        start:
+          type: string
+          format: date-time
+          description: Start of the first minute of the series
+        step:
+          type: integer
+          description: Seconds per entry of events and refused, always 60
+        events:
+          type: array
+          minItems: 1440
+          maxItems: 1440
+          items:
+            type: integer
+          description: Primary events that entered the stream, per minute; the last entry is the current minute
+        refused:
+          type: array
+          minItems: 1440
+          maxItems: 1440
+          items:
+            type: integer
+          description: >-
+            Deliveries the webhook receiver answered with publish_error, too_large,
+            invalid_payload or read_error, per minute. Requests that never reached
+            the receiver are not counted
+        last_event:
+          type: string
+          format: date-time
+          description: Store time of the newest message in the stream; absent when there is none
+        events_1h:
+          type: integer
+        events_24h:
+          type: integer
+        refused_1h:
+          type: integer
+        refused_24h:
+          type: integer
+      example:
+        now: "2026-11-22T10:15:42Z"
+        start: "2026-11-21T10:16:00Z"
+        step: 60
+        events: [212, 198, 240]
+        refused: [0, 0, 1]
+        last_event: "2026-11-22T10:15:40Z"
+        events_1h: 12480
+        events_24h: 301522
+        refused_1h: 0
+        refused_24h: 3

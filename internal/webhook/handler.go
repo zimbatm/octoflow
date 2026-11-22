@@ -29,6 +29,9 @@ type Publisher interface {
 type Handler struct {
 	config    *config.WebhookConfig
 	publisher Publisher
+	// Refused is called for each delivery that got an error answer and
+	// whose event is lost with it; see refused. nil counts nothing.
+	Refused func(at time.Time)
 }
 
 func NewHandler(cfg *config.WebhookConfig, publisher Publisher) *Handler {
@@ -43,6 +46,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		metrics.WebhookRequestsTotal.WithLabelValues(eventType, organization, status).Inc()
 		metrics.WebhookRequestDuration.WithLabelValues(eventType).Observe(time.Since(start).Seconds())
 		metrics.WebhookPayloadSize.WithLabelValues(eventType).Observe(float64(payloadSize))
+		if h.Refused != nil && refused(status) {
+			h.Refused(start)
+		}
 	}()
 	fail := func(code int, msg, why string) {
 		http.Error(w, msg, code)
@@ -149,6 +155,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	reply(w, map[string]string{"status": "ok", "delivery_id": deliveryID})
 	status = "success"
+}
+
+// refused says whether a status is a delivery that carried an event and
+// did not get stored. The other errors are not deliveries of GitHub, or
+// refuse on purpose: a bad signature, missing headers, an organization
+// that is not allowed. They would let any scanner raise the public count.
+func refused(status string) bool {
+	switch status {
+	case "publish_error", "too_large", "invalid_payload", "read_error":
+		return true
+	}
+	return false
 }
 
 // validSignature checks the HMAC-SHA256 that GitHub sends. Without a
