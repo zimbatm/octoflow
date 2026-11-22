@@ -26,17 +26,21 @@ type parquetRow struct {
 	HookID           string `parquet:"name=hook_id, type=BYTE_ARRAY, convertedtype=UTF8"`
 	HookInstallation string `parquet:"name=hook_installation, type=BYTE_ARRAY, convertedtype=UTF8"`
 	ReceivedAt       int64  `parquet:"name=received_at, type=INT64, convertedtype=TIMESTAMP_MILLIS"`
-	Payload          string `parquet:"name=payload, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Repository       string `parquet:"name=repository, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Organization     string `parquet:"name=organization, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Sender           string `parquet:"name=sender, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Action           string `parquet:"name=action, type=BYTE_ARRAY, convertedtype=UTF8"`
-	OrganizationID   string `parquet:"name=organization_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	RepositoryID     string `parquet:"name=repository_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	SenderID         string `parquet:"name=sender_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	// omitstats: the library writes the smallest and the largest value of a
+	// column into every page header, uncompressed. For this column that is
+	// two whole payloads for each page, and with a page per payload the file
+	// was 3.5 times its input.
+	Payload        string `parquet:"name=payload, type=BYTE_ARRAY, convertedtype=UTF8, omitstats=true"`
+	Repository     string `parquet:"name=repository, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Organization   string `parquet:"name=organization, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Sender         string `parquet:"name=sender, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Action         string `parquet:"name=action, type=BYTE_ARRAY, convertedtype=UTF8"`
+	OrganizationID string `parquet:"name=organization_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	RepositoryID   string `parquet:"name=repository_id, type=BYTE_ARRAY, convertedtype=UTF8"`
+	SenderID       string `parquet:"name=sender_id, type=BYTE_ARRAY, convertedtype=UTF8"`
 	// JSON object, empty when the event has no metadata. Files written
 	// before this column existed decode with it empty.
-	Metadata string `parquet:"name=metadata, type=BYTE_ARRAY, convertedtype=UTF8"`
+	Metadata string `parquet:"name=metadata, type=BYTE_ARRAY, convertedtype=UTF8, omitstats=true"`
 }
 
 func toRow(e *events.GitHubEvent) parquetRow {
@@ -228,14 +232,20 @@ func EncodeParquet(cfg *config.S3Config, eventList []*events.GitHubEvent) ([]byt
 	}
 
 	switch cfg.CompressionType {
+	case "snappy":
+		pw.CompressionType = parquet.CompressionCodec_SNAPPY
 	case "gzip":
 		pw.CompressionType = parquet.CompressionCodec_GZIP
 	case "lz4":
 		pw.CompressionType = parquet.CompressionCodec_LZ4
 	default:
-		pw.CompressionType = parquet.CompressionCodec_SNAPPY
+		pw.CompressionType = parquet.CompressionCodec_ZSTD
 	}
 	pw.RowGroupSize = int64(cfg.RowGroupSize)
+	// a page is compressed alone. At the default of 8 kB each payload was
+	// its own page; events of one repository share most of their text, and
+	// a larger page lets the codec use that.
+	pw.PageSize = 1 << 20
 
 	for _, event := range eventList {
 		if err := pw.Write(toRow(event)); err != nil {
