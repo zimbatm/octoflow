@@ -33,6 +33,28 @@ writes them, but copies of different events can interleave: ten workers
 pull in parallel. Within one subject the order is the order of
 publishing.
 
+### CI events and the head of a pull request
+
+The pr copy of a CI event is best-effort, unlike every other copy. The
+dispatcher links a CI event to a pull request through a map from head
+commit to pull request number, which it learns from `pull_request`
+events. It writes the map before the copies of the `pull_request`
+event, so before that event is acknowledged.
+
+| Case | Result |
+|---|---|
+| CI event dispatched after the `pull_request` event of its head | pr copy |
+| CI event dispatched before it: GitHub delivered it first, or another worker was faster | no pr copy; the repo copy and the primary event are there |
+| the same commit, later CI events, same dispatcher process | pr copy at once |
+| the same commit, later CI events, another dispatcher process | pr copy after at most 10 seconds, the life of a cached miss |
+| the map cannot be read or written | no pr copy, a warning in the log, the event is acknowledged |
+| the event is redelivered | the same copies; the stream drops them by id inside the duplicate window |
+
+A copy that was missed is not written later. The series
+`octoflow_dispatch_ci_events_total{link="none"}` counts the CI events
+without a pr copy; most of them are for commits that are not the head
+of a pull request.
+
 ## From the stream to S3
 
 The s3 service acknowledges a message only after the batch holding it

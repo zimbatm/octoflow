@@ -29,7 +29,7 @@ Every selector given must match. At least one is required.
 | `--repo ID` | a repository, by numeric id |
 | `--org ID` | an organization, by numeric id |
 | `--user ID` | a user involved in the event: sender, author, assignee, reviewer, by numeric id |
-| `--pr N`, `--issue N` | a pull request or issue number; combine with `--repo` |
+| `--pr N`, `--issue N` | a pull request or issue number; combine with `--repo`. `--pr` selects the events that name the pull request, not the CI events copied to its subject: select those with `--id`, or with `--event` and the days |
 | `--from DATE`, `--to DATE` | UTC days, inclusive, by `received_at`; `--to` needs `--from` |
 
 ## 3. Count first

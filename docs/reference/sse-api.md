@@ -47,6 +47,13 @@ carry the id. Only the id goes into a subject, never the name.
 
 The id routes do not use the index.
 
+The pr route carries the `pull_request`, `pull_request_review` and
+`pull_request_review_comment` events of the pull request, and the
+`check_run`, `check_suite`, `workflow_run`, `workflow_job` and `status`
+events of its head commits. `?type=check_run,status` keeps only those.
+The link from a CI event to its pull request is best-effort; see
+[CI events on the pr subject](subjects.md#ci-events-on-the-pr-subject).
+
 | Route | Answers |
 |---|---|
 | `/stats` | JSON: `total_clients`, the open connections of this process; `events_stored`, the events in the stream without the fan-out copies, refreshed every 30 seconds; `stored_since`, the store time of the oldest message. The last two are absent when the stream does not answer |

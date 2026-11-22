@@ -11,7 +11,7 @@ browser's `EventSource` reads. No client library is needed.
 | `/events/org/{login}` | one organization |
 | `/events/repo/{owner}/{name}` | one repository |
 | `/events/user/{login}` | everything a user is involved in |
-| `/events/pr/{owner}/{name}/{number}` | one pull request |
+| `/events/pr/{owner}/{name}/{number}` | one pull request, with the CI events of its head commits |
 | `/events/issue/{owner}/{name}/{number}` | one issue |
 | `/events/type/{event_type}` | one event type across organizations |
 

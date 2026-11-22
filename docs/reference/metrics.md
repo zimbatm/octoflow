@@ -34,6 +34,11 @@ series per organization that delivers.
 | Series | Labels | Meaning |
 |---|---|---|
 | `octoflow_dispatched_events_total` | `status` | `ok`, `error` (nak, redelivered), `undecodable` (terminated) |
+| `octoflow_dispatch_ci_events_total` | `event_type`, `link` | dispatched `check_run`, `check_suite`, `workflow_run`, `workflow_job` and `status` events. `link` says where the pull request came from: `payload` (the `pull_requests` list), `map` (the head commit in `octoflow_heads`), `none` (no pr copy) |
+
+`none` is normal for CI on a branch without a pull request. A share of
+`map` that falls to zero while pull requests are open means the bucket
+`octoflow_heads` does not answer; the dispatcher logs a warning then.
 
 ## S3 service
 

@@ -41,6 +41,11 @@ var (
 		Help: "Events the dispatcher handled, by outcome",
 	}, []string{"status"})
 
+	DispatchCIEvents = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "octoflow_dispatch_ci_events_total",
+		Help: "CI events the dispatcher handled, by where their pull request came from",
+	}, []string{"event_type", "link"})
+
 	S3BatchesWritten = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "octoflow_s3_batches_written_total",
 		Help: "Parquet batches uploaded, by outcome",

@@ -34,8 +34,12 @@ run `nix build`, copy the hash it prints).
    primary subjects, replies 200 only after JetStream acked. Refuses to
    start without `WEBHOOK_SECRET` unless `WEBHOOK_ALLOW_UNSIGNED=true`.
 2. `dispatcher`: consumes the primary subjects and republishes each event
-   to repo, user, pr and issue subjects (`internal/dispatch`); writes the
-   name index (`internal/names`).
+   to repo, user, pr and issue subjects (`internal/dispatch`). CI events
+   (`check_run`, `check_suite`, `workflow_run`, `workflow_job`, `status`)
+   get a pr copy through the KV bucket `octoflow_heads`, head commit to
+   pull request numbers, learned from `pull_request` events
+   (`internal/dispatch/heads.go`); best-effort, never fails a dispatch.
+   It also writes the name index (`internal/names`).
 3. `s3`: batches primary events into Parquet files in S3; acks only after
    the upload (`internal/storage`).
 4. `sse`: streams events to browsers; `Last-Event-ID` is the
