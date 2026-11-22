@@ -17,6 +17,7 @@ import (
 	"github.com/zimbatm/octoflow/internal/dispatch"
 	"github.com/zimbatm/octoflow/internal/ghevents"
 	"github.com/zimbatm/octoflow/internal/metrics"
+	nameIndex "github.com/zimbatm/octoflow/internal/names"
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
 	"github.com/zimbatm/octoflow/internal/publicingest"
 	"github.com/zimbatm/octoflow/internal/sse"
@@ -48,9 +49,14 @@ func runDispatcher(ctx context.Context, cfg *config.Config, js nats.JetStreamCon
 		return fmt.Errorf("failed to create consumer: %w", err)
 	}
 	publisher := natsInternal.NewPublisher(js, &cfg.NATS)
+	kv, err := nameIndex.Open(js, cfg.NATS.StreamReplicas)
+	if err != nil {
+		return fmt.Errorf("failed to open name index: %w", err)
+	}
+	index := nameIndex.NewWriter(kv)
 
 	pullLoop(ctx, cfg, js, consumer, func(msg *nats.Msg) {
-		_, err := dispatch.Dispatch(ctx, publisher, cfg.NATS.SubjectPrefix, msg.Data, cfg.Dispatch.SkipUserEvents)
+		_, err := dispatch.Dispatch(ctx, publisher, index, cfg.NATS.SubjectPrefix, msg.Data, cfg.Dispatch.SkipUserEvents)
 		switch {
 		case errors.Is(err, dispatch.ErrUndecodable):
 			metrics.DispatchedEvents.WithLabelValues("undecodable").Inc()
@@ -119,8 +125,13 @@ func runS3(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) er
 }
 
 func sseRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) (func(), error) {
+	kv, err := nameIndex.Open(js, cfg.NATS.StreamReplicas)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open name index: %w", err)
+	}
 	h := sse.NewHandler(js, cfg.NATS.StreamName, cfg.SSE.MaxClients)
 	h.Site = cfg.Site
+	h.Names = nameIndex.NewResolver(kv)
 	sse.Routes(mux, h, cfg.NATS.SubjectPrefix)
 	return h.Shutdown, nil
 }

@@ -14,8 +14,9 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// Routes registers the SSE endpoints and /stats on mux. Every id in a path
-// must be numeric; a subject may not take wildcards from a client.
+// Routes registers the SSE endpoints and /stats on mux. Only numeric ids
+// reach a subject, which may not take wildcards from a client; a name in a
+// path is first resolved to its id (names.go).
 func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 	get := func(pattern string, fn http.HandlerFunc) {
 		mux.Handle("GET "+pattern, cors(fn))
@@ -50,7 +51,7 @@ func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 	})
 
 	get("/events/org/{org_id}", func(w http.ResponseWriter, r *http.Request) {
-		id, ok := numeric(w, r, "org_id")
+		id, ok := orgID(h, w, r)
 		if !ok {
 			return
 		}
@@ -66,7 +67,7 @@ func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 	})
 
 	get("/events/user/{user_id}", func(w http.ResponseWriter, r *http.Request) {
-		id, ok := numeric(w, r, "user_id")
+		id, ok := userID(h, w, r)
 		if !ok {
 			return
 		}
@@ -96,6 +97,8 @@ func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 		}
 		serve(h, w, r, "issue-"+repo+"-"+n, []string{fmt.Sprintf("%s.issue.%s.%s.>", prefix, repo, n)})
 	})
+
+	nameRoutes(get, h, prefix)
 
 	get("/events/type/{event_type}", func(w http.ResponseWriter, r *http.Request) {
 		t := r.PathValue("event_type")

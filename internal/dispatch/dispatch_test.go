@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/zimbatm/octoflow/internal/config"
+	"github.com/zimbatm/octoflow/internal/names"
 	natsInternal "github.com/zimbatm/octoflow/internal/nats"
 	"github.com/zimbatm/octoflow/internal/natstest"
 	"github.com/zimbatm/octoflow/pkg/events"
@@ -100,7 +101,7 @@ func TestDispatchGivesEachCopyItsOwnID(t *testing.T) {
 	rec := &recorder{}
 	data := storedEvent(t)
 
-	n, err := Dispatch(context.Background(), rec, "p", data, nil)
+	n, err := Dispatch(context.Background(), rec, nil, "p", data, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,13 +128,13 @@ func TestDispatchGivesEachCopyItsOwnID(t *testing.T) {
 
 func TestDispatchReportsPublishFailure(t *testing.T) {
 	rec := &recorder{fail: errors.New("nats down")}
-	if _, err := Dispatch(context.Background(), rec, "p", storedEvent(t), nil); err == nil {
+	if _, err := Dispatch(context.Background(), rec, nil, "p", storedEvent(t), nil); err == nil {
 		t.Fatal("expected an error")
 	}
 }
 
 func TestDispatchRejectsUndecodableMessage(t *testing.T) {
-	_, err := Dispatch(context.Background(), &recorder{}, "p", []byte("not json"), nil)
+	_, err := Dispatch(context.Background(), &recorder{}, nil, "p", []byte("not json"), nil)
 	if !errors.Is(err, ErrUndecodable) {
 		t.Errorf("err = %v, want ErrUndecodable", err)
 	}
@@ -158,7 +159,7 @@ func TestDispatchStoresCopiesOnce(t *testing.T) {
 	}
 
 	for i := 0; i < 2; i++ {
-		if _, err := Dispatch(ctx, pub, "p", data, nil); err != nil {
+		if _, err := Dispatch(ctx, pub, nil, "p", data, nil); err != nil {
 			t.Fatalf("dispatch %d: %v", i, err)
 		}
 	}
@@ -174,7 +175,7 @@ func TestDispatchStoresCopiesOnce(t *testing.T) {
 
 func TestDispatchSkipsUserCopiesForListedTypes(t *testing.T) {
 	rec := &recorder{}
-	if _, err := Dispatch(context.Background(), rec, "p", storedEvent(t), []string{"check_run", "pull_request"}); err != nil {
+	if _, err := Dispatch(context.Background(), rec, nil, "p", storedEvent(t), []string{"check_run", "pull_request"}); err != nil {
 		t.Fatal(err)
 	}
 	var subjects []string
@@ -186,10 +187,88 @@ func TestDispatchSkipsUserCopiesForListedTypes(t *testing.T) {
 	}
 
 	rec = &recorder{}
-	if _, err := Dispatch(context.Background(), rec, "p", storedEvent(t), []string{"check_run"}); err != nil {
+	if _, err := Dispatch(context.Background(), rec, nil, "p", storedEvent(t), []string{"check_run"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(rec.calls) != 3 {
 		t.Errorf("%d copies of a type that is not listed, want 3", len(rec.calls))
+	}
+}
+
+func namedEvent(t *testing.T, id, repo, sender, senderID string) []byte {
+	t.Helper()
+	data, err := json.Marshal(&events.GitHubEvent{
+		ID: id, Event: "push",
+		Organization: "NixOS", OrganizationID: "487568",
+		Repository: repo, RepositoryID: "4542716",
+		Sender: sender, SenderID: senderID,
+		Payload: json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+func TestDispatchFillsTheNameIndex(t *testing.T) {
+	_, js := natstest.Start(t)
+	kv, err := names.Open(js, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	index := names.NewWriter(kv)
+	ctx := context.Background()
+	writes := func() uint64 {
+		t.Helper()
+		info, err := js.StreamInfo("KV_" + names.Bucket)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.State.LastSeq
+	}
+
+	if _, err := Dispatch(ctx, &recorder{}, index, "p", namedEvent(t, "d1", "NixOS/nixpkgs", "zimbatm", "3248"), nil); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{"org.nixos": "487568", "repo.nixos.nixpkgs": "4542716", "user.zimbatm": "3248"} {
+		e, err := kv.Get(key)
+		if err != nil || string(e.Value()) != want {
+			t.Errorf("%s = %v, %v; want %s", key, e, err, want)
+		}
+	}
+	if n := writes(); n != 3 {
+		t.Fatalf("%d writes for the first event, want 3", n)
+	}
+
+	for _, id := range []string{"d2", "d3", "d4"} {
+		if _, err := Dispatch(ctx, &recorder{}, index, "p", namedEvent(t, id, "NixOS/nixpkgs", "zimbatm", "3248"), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := writes(); n != 3 {
+		t.Errorf("%d writes after three more events with the same names, want 3", n)
+	}
+
+	if _, err := Dispatch(ctx, &recorder{}, index, "p", namedEvent(t, "d5", "NixOS/nixpkgs", "someone", "5"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if n := writes(); n != 4 {
+		t.Errorf("%d writes after an event with one new name, want 4", n)
+	}
+}
+
+func TestDispatchSurvivesAFailedIndexWrite(t *testing.T) {
+	_, js := natstest.Start(t)
+	kv, err := names.Open(js, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := js.DeleteKeyValue(names.Bucket); err != nil {
+		t.Fatal(err)
+	}
+	rec := &recorder{}
+	n, err := Dispatch(context.Background(), rec, names.NewWriter(kv), "p", namedEvent(t, "d1", "NixOS/nixpkgs", "zimbatm", "3248"), nil)
+	if err != nil || n != 2 || len(rec.calls) != 2 {
+		t.Errorf("Dispatch = %d, %v with %d copies; want the repo and user copies and no error", n, err, len(rec.calls))
 	}
 }

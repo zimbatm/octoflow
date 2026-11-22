@@ -8,14 +8,20 @@ browser's `EventSource` reads. No client library is needed.
 | Route | Events |
 |---|---|
 | `/events` | every event once |
-| `/events/org/{org_id}` | one organization |
-| `/events/repo/{repo_id}` | one repository |
-| `/events/user/{user_id}` | everything a user is involved in |
-| `/events/pr/{repo_id}/{number}` | one pull request |
-| `/events/issue/{repo_id}/{number}` | one issue |
+| `/events/org/{login}` | one organization |
+| `/events/repo/{owner}/{name}` | one repository |
+| `/events/user/{login}` | everything a user is involved in |
+| `/events/pr/{owner}/{name}/{number}` | one pull request |
+| `/events/issue/{owner}/{name}/{number}` | one issue |
 | `/events/type/{event_type}` | one event type across organizations |
 
-Ids must be numeric. Add `?last=N` to replay the last N events first
+Names are GitHub names in any case, for example
+`/events/repo/NixOS/nixpkgs`. Octoflow knows a name once it has seen an
+event with it; before that the route answers 404 with a JSON `error`.
+Each route also takes the numeric id in place of the name
+(`/events/org/487568`, `/events/repo/4542716`, `/events/pr/4542716/123`).
+The id never changes; a name can. See
+[Names in a route](../reference/sse-api.md#names-in-a-route). Add `?last=N` to replay the last N events first
 (default 50, maximum 1000, `0` for none).
 
 Add `?type=push,pull_request` to read only some event types. Most
@@ -28,7 +34,7 @@ that count, so it can show fewer than N.
 ## 2. Connect
 
 ```javascript
-const url = 'https://events.example.org/events/repo/4542716?type=pull_request&last=20';
+const url = 'https://events.example.org/events/repo/NixOS/nixpkgs?type=pull_request&last=20';
 const source = new EventSource(url);
 
 source.onmessage = (e) => {
@@ -39,6 +45,9 @@ source.onmessage = (e) => {
 source.addEventListener('connected', (e) => console.log('connected', e.data));
 source.onerror = () => console.log('reconnecting');
 ```
+
+`EventSource` does not show a status code. If the name can be unknown,
+call `fetch(url)` first and read the `error` of a 404.
 
 GitHub events carry no event name, so `onmessage` receives every type;
 the type is in `event.event`. The `connected` event comes

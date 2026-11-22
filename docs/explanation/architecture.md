@@ -53,6 +53,15 @@ subscription on `repo.4542716.>` survives all of that; one on a name
 would not, and historical data would split in two. The parsed names are
 still in every message for display and logging.
 
+A person knows `NixOS/nixpkgs`, not 4542716, and GitHub limits lookups
+without a token to 60 per hour per address. Octoflow sees every name
+next to its id in the events it routes, so the dispatcher keeps a name
+index in the KV bucket `octoflow_names` and the SSE server accepts a
+name in a route. The name is resolved once, when the client connects;
+the subject still carries the id. The index is a convenience and not a
+record: it holds only names that an event carried, it keeps the old name
+after a rename, and it can be deleted and left to fill again.
+
 ## Deduplication by message id
 
 GitHub can deliver the same event twice, and an operator can press

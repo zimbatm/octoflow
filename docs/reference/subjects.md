@@ -79,3 +79,32 @@ window.
 Progress of public-ingest is not a consumer but the KV bucket
 `octoflow_public_ingest`, keys `events-api.<repo_id>` and
 `gharchive.next_hour`.
+
+## The name index
+
+The KV bucket `octoflow_names` maps GitHub names to the ids in the
+subjects. The dispatcher writes it; the SSE server reads it for the
+[routes that take a name](sse-api.md#names-in-a-route).
+
+| Key | Value | From the event fields |
+|---|---|---|
+| `org.{login}` | organization id | `organization`, `organization_id` |
+| `repo.{owner}.{name}` | repository id | `repository`, `repository_id` |
+| `user.{login}` | user id | `sender`, `sender_id` |
+
+| Rule | Detail |
+|---|---|
+| Case | Keys are lower case; GitHub names are case-insensitive. |
+| Characters | A name has letters, digits, `-`, `_` and `.`, at most 100 per part. An event name with another character, such as `dependabot[bot]`, gets no key. |
+| `.` in a name | Written `=`, because `.` separates the parts of a key: `numtide/.github` is `repo.numtide.=github`. |
+| Value | The id in decimal digits. A reader must ignore any other value. |
+| Organization | As in the primary subject: the owner of the repository when the payload has no organization. A user that owns a repository thus also has an `org.` key. |
+| User | Only the sender of an event. Other involved users get a user subject but no key. |
+| Writes | One per new or changed pair for each dispatcher process, which remembers what it wrote. A restart writes each pair again once. A failed write is logged at most once per minute and tried again with the next event that carries the pair; it does not delay the event. |
+| Rename | The new name gets a key with the same id. The old key stays. If another id later takes the old name, the next event with that name changes the key. |
+| Expiry | None. The bucket keeps one value per key. Delete a key with `nats kv del octoflow_names <key>`; the dispatcher writes it again only after a restart or a change. |
+
+```bash
+nats kv get octoflow_names repo.nixos.nixpkgs --raw   # 4542716
+nats kv ls octoflow_names
+```
