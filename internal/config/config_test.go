@@ -141,3 +141,29 @@ func TestSiteFromEnv(t *testing.T) {
 		}
 	}
 }
+
+func TestDailyPrefix(t *testing.T) {
+	t.Setenv("S3_KEY_PREFIX", "nixpkgs")
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.S3.DailyPrefix != "nixpkgs-daily" {
+		t.Errorf("DailyPrefix = %q, want it next to the key prefix", cfg.S3.DailyPrefix)
+	}
+	if err := cfg.S3.ValidateDaily(); err != nil {
+		t.Error(err)
+	}
+	for _, bad := range []string{"", "/", "nixpkgs", "nixpkgs/", "nixpkgs/daily"} {
+		c := S3Config{KeyPrefix: "nixpkgs", DailyPrefix: bad}
+		if c.ValidateDaily() == nil {
+			t.Errorf("daily prefix %q with key prefix nixpkgs must be refused", bad)
+		}
+	}
+	if (&S3Config{KeyPrefix: "data/events", DailyPrefix: "data"}).ValidateDaily() == nil {
+		t.Error("a daily prefix that holds the key prefix must be refused")
+	}
+	if err := (&S3Config{KeyPrefix: "data/events", DailyPrefix: "data/daily"}).ValidateDaily(); err != nil {
+		t.Error(err)
+	}
+}

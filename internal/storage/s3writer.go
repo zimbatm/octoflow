@@ -12,6 +12,7 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/xitongsys/parquet-go-source/buffer"
 	"github.com/xitongsys/parquet-go/parquet"
+	"github.com/xitongsys/parquet-go/source"
 	"github.com/xitongsys/parquet-go/writer"
 	"github.com/zimbatm/octoflow/internal/config"
 	"github.com/zimbatm/octoflow/internal/metrics"
@@ -226,7 +227,23 @@ func (w *S3Writer) encodeParquet(eventList []*events.GitHubEvent) ([]byte, error
 func EncodeParquet(cfg *config.S3Config, eventList []*events.GitHubEvent) ([]byte, error) {
 	fw := buffer.NewBufferFile()
 
-	pw, err := writer.NewParquetWriter(fw, new(parquetRow), 4)
+	pw, err := newParquetWriter(cfg, fw)
+	if err != nil {
+		return nil, err
+	}
+	for _, event := range eventList {
+		if err := pw.Write(toRow(event)); err != nil {
+			return nil, fmt.Errorf("failed to write event %s: %w", event.ID, err)
+		}
+	}
+	if err := pw.WriteStop(); err != nil {
+		return nil, fmt.Errorf("failed to finish parquet file: %w", err)
+	}
+	return fw.Bytes(), nil
+}
+
+func newParquetWriter(cfg *config.S3Config, pf source.ParquetFile) (*writer.ParquetWriter, error) {
+	pw, err := writer.NewParquetWriter(pf, new(parquetRow), 4)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create parquet writer: %w", err)
 	}
@@ -246,16 +263,7 @@ func EncodeParquet(cfg *config.S3Config, eventList []*events.GitHubEvent) ([]byt
 	// its own page; events of one repository share most of their text, and
 	// a larger page lets the codec use that.
 	pw.PageSize = 1 << 20
-
-	for _, event := range eventList {
-		if err := pw.Write(toRow(event)); err != nil {
-			return nil, fmt.Errorf("failed to write event %s: %w", event.ID, err)
-		}
-	}
-	if err := pw.WriteStop(); err != nil {
-		return nil, fmt.Errorf("failed to finish parquet file: %w", err)
-	}
-	return fw.Bytes(), nil
+	return pw, nil
 }
 
 // objectKey returns prefix/YYYY/MM/DD/<unix nanos>.parquet

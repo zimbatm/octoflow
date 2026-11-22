@@ -78,6 +78,9 @@ type S3Config struct {
 	Region    string
 	Bucket    string
 	KeyPrefix string
+	// where compact writes one file per day; apart from KeyPrefix, so that
+	// no listing of the batch files returns a daily file
+	DailyPrefix string
 
 	// a batch closes on BatchSize events, BatchMaxBytes of payload or
 	// BatchTimeout after its first event, whichever comes first
@@ -165,6 +168,7 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	keyPrefix := getEnvOrDefault("S3_KEY_PREFIX", "github-events")
 	batchSize, err := envParse("S3_BATCH_SIZE", 1000, strconv.Atoi)
 	if err != nil {
 		return nil, err
@@ -221,7 +225,8 @@ func LoadFromEnv() (*Config, error) {
 		S3: S3Config{
 			Region:          getEnvOrDefault("AWS_REGION", "us-east-1"),
 			Bucket:          os.Getenv("S3_BUCKET"),
-			KeyPrefix:       getEnvOrDefault("S3_KEY_PREFIX", "github-events"),
+			KeyPrefix:       keyPrefix,
+			DailyPrefix:     getEnvOrDefault("S3_DAILY_PREFIX", keyPrefix+"-daily"),
 			BatchSize:       batchSize,
 			BatchTimeout:    batchTimeout,
 			BatchMaxBytes:   batchMaxBytes,
@@ -311,6 +316,20 @@ func splitList(s string) []string {
 func (c *S3Config) Validate() error {
 	if c.Bucket == "" {
 		return errors.New("S3_BUCKET environment variable is required")
+	}
+	return nil
+}
+
+// ValidateDaily reports a DailyPrefix that shares keys with KeyPrefix. A
+// daily file under the batch prefix would be restored as a batch, and a
+// batch file under the daily prefix would be wiped as a daily file.
+func (c *S3Config) ValidateDaily() error {
+	daily, batch := strings.Trim(c.DailyPrefix, "/")+"/", strings.Trim(c.KeyPrefix, "/")+"/"
+	if daily == "/" {
+		return errors.New("S3_DAILY_PREFIX must not be empty")
+	}
+	if strings.HasPrefix(daily, batch) || strings.HasPrefix(batch, daily) {
+		return fmt.Errorf("S3_DAILY_PREFIX %q and S3_KEY_PREFIX %q must not contain each other", c.DailyPrefix, c.KeyPrefix)
 	}
 	return nil
 }
