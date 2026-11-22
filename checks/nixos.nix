@@ -3,10 +3,25 @@ pkgs.testers.runNixOSTest {
   name = "octoflow";
 
   nodes.machine =
-    { pkgs, ... }:
+    { config, pkgs, ... }:
     {
       imports = [ flake.nixosModules.default ];
       virtualisation.memorySize = 2048;
+
+      # s3 is set and public-ingest is not, so only the first has a target
+      assertions = [
+        {
+          assertion =
+            builtins.attrNames config.services.octoflow.metricsTargets == [
+              "dispatcher"
+              "nats"
+              "s3"
+              "sse"
+              "webhook"
+            ];
+          message = "metricsTargets must list the units that run";
+        }
+      ];
       environment.systemPackages = [
         pkgs.curl
         pkgs.openssl
