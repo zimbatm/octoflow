@@ -113,3 +113,31 @@ func TestStreamAgesFromEnv(t *testing.T) {
 		t.Errorf("err = %v, want one that names NATS_STREAM_MAX_AGE", err)
 	}
 }
+
+func TestSiteFromEnv(t *testing.T) {
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Site.Title != "Octoflow" || cfg.Site.Intro != "" || len(cfg.Site.Streams) != 0 {
+		t.Errorf("default site = %+v", cfg.Site)
+	}
+
+	t.Setenv("SITE_TITLE", "NixOS events")
+	t.Setenv("SITE_STREAMS", "NixOS/nixpkgs=/events/repo/4542716, NixOS = /events/org/487568")
+	cfg, err = LoadFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SiteStream{{"NixOS/nixpkgs", "/events/repo/4542716"}, {"NixOS", "/events/org/487568"}}
+	if cfg.Site.Title != "NixOS events" || len(cfg.Site.Streams) != 2 || cfg.Site.Streams[0] != want[0] || cfg.Site.Streams[1] != want[1] {
+		t.Errorf("site = %+v", cfg.Site)
+	}
+
+	for _, bad := range []string{"NixOS/nixpkgs", "x=/events/repo/abc", "x=https://evil.example/", "=/events", "x=/stats"} {
+		t.Setenv("SITE_STREAMS", bad)
+		if _, err := LoadFromEnv(); err == nil || !strings.Contains(err.Error(), "SITE_STREAMS") {
+			t.Errorf("SITE_STREAMS=%q: err = %v, want one that names the variable", bad, err)
+		}
+	}
+}

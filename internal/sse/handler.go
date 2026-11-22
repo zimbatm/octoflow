@@ -31,7 +31,9 @@ type Handler struct {
 	// MaxClients bounds the open streams, each of which holds a JetStream
 	// consumer; 0 is unlimited. Beyond it a request gets a 503.
 	MaxClients int
-	clients    atomic.Int64
+	// Site is served at /site for the landing page; nil serves null
+	Site    any
+	clients atomic.Int64
 	// replay starts found by startSeqForLast, keyed by subjects, count and
 	// stream bounds; a reconnect storm asks the same question many times
 	cacheMu sync.Mutex

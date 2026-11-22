@@ -57,6 +57,8 @@ header.top nav { display: flex; gap: 16px; margin-left: auto; flex-wrap: wrap; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .btn.small { padding: 3px 10px; font-size: 13px; }
 .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.featured { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.featured[hidden] { display: none; }
 .finder-status { font-size: 13px; margin: 8px 0 0; min-height: 1.5em; }
 .finder-status.bad { color: var(--bad); }
 
@@ -134,7 +136,7 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
 <body>
 <header class="top">
     <div class="wrap">
-        <span class="brand">Octoflow</span>
+        <span class="brand" id="brand">Octoflow</span>
         <nav aria-label="Sections">
             <a href="#explore">Explore</a>
             <a href="#use">Use a stream</a>
@@ -146,7 +148,7 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
 
 <div class="wrap hero">
     <h1>Every GitHub event of an organization, as a live stream.</h1>
-    <p>Octoflow stores the webhook events of the organizations that send them here, and serves them over
+    <p id="intro">Octoflow stores the webhook events of the organizations that send them here, and serves them over
        Server-Sent Events. You can follow everything, or one repository, user, pull request or issue.
        No key is necessary. Look at the data below, then copy the snippet for the stream you see.</p>
     <ul class="facts">
@@ -167,6 +169,7 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
                 <button class="btn" type="button" id="everything">Everything</button>
             </form>
             <p class="finder-status" id="finder-status" role="status"></p>
+            <div class="featured" id="featured" hidden><span>On this server:</span></div>
             <p class="hint">Or select an event in the list: each one links to the streams of its repository, its author and its pull request or issue.</p>
         </div>
 
@@ -620,6 +623,32 @@ async function find(text) {
     throw new Error('Write owner/repo, owner/repo#number, @user, an organization name, or type:push.');
 }
 
+// the path decides what is fetched, so it must be one of the routes
+const ROUTE = /^\/events(?:\/(org|repo|user)\/\d+|\/(pr|issue)\/\d+\/\d+|\/(type)\/[a-z_]+)?$/;
+function scopeOf(label, path) {
+    const m = typeof path === 'string' && path.match(ROUTE);
+    return m ? { kind: m[1] || m[2] || m[3] || 'all', label: String(label).slice(0, 120), path } : null;
+}
+
+// what the operator says about this server: its name, its introduction and
+// the streams to offer first. The page works without it.
+function fetchSite() {
+    fetch(SSE_BASE + '/site').then(r => (r.ok ? r.json() : null)).then(site => {
+        if (!site) return;
+        if (site.title) {
+            $('brand').textContent = site.title;
+            document.title = site.title + ': live GitHub events';
+        }
+        if (site.intro) $('intro').textContent = site.intro;
+        const streams = (site.streams || []).map(s => scopeOf(s.label, s.path)).filter(Boolean);
+        if (streams.length) {
+            $('featured').append(...streams.map(s =>
+                el('button', { class: 'btn small', type: 'button', title: s.path, on: { click: () => open(s) } }, s.label)));
+            $('featured').hidden = false;
+        }
+    }).catch(() => {});
+}
+
 function fetchStats() {
     fetch(SSE_BASE + '/stats').then(r => r.json()).then(s => {
         $('fact-clients').textContent = s.total_clients ?? '-';
@@ -664,11 +693,9 @@ setInterval(fetchStats, 30000);
 let start = EVERYTHING;
 try {
     const saved = JSON.parse(decodeURIComponent(location.hash.slice(1)));
-    // the path decides what is fetched, so it must be one of the routes
-    if (saved && /^\/events(\/(org|repo|user)\/\d+|\/(pr|issue)\/\d+\/\d+|\/type\/[a-z_]+)?$/.test(saved.path)) {
-        start = { kind: String(saved.kind), label: String(saved.label).slice(0, 120), path: saved.path };
-    }
+    start = (saved && scopeOf(saved.label, saved.path)) || EVERYTHING;
 } catch (e) { /* no saved stream */ }
+fetchSite();
 open(start);
 </script>
 </body>

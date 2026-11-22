@@ -120,6 +120,7 @@ func runS3(ctx context.Context, cfg *config.Config, js nats.JetStreamContext) er
 
 func sseRoutes(cfg *config.Config, js nats.JetStreamContext, mux *http.ServeMux) (func(), error) {
 	h := sse.NewHandler(js, cfg.NATS.StreamName, cfg.SSE.MaxClients)
+	h.Site = cfg.Site
 	sse.Routes(mux, h, cfg.NATS.SubjectPrefix)
 	return h.Shutdown, nil
 }

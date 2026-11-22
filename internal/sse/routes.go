@@ -36,6 +36,11 @@ func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 		_ = json.NewEncoder(w).Encode(stats)
 	})
 
+	get("/site", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(h.Site)
+	})
+
 	get("/events", func(w http.ResponseWriter, r *http.Request) {
 		serve(h, w, r, "all", natsInternal.PrimarySubjects(prefix))
 	})
