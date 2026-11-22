@@ -1,888 +1,675 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Octoflow - GitHub Events Dashboard</title>
-    <style>
-        * {
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f5f5f5;
-            color: #24292e;
-        }
-        
-        .container {
-            display: grid;
-            grid-template-columns: 300px 1fr;
-            height: 100vh;
-            overflow: hidden;
-        }
-        
-        /* Sidebar */
-        .sidebar {
-            background: white;
-            border-right: 1px solid #e1e4e8;
-            overflow-y: auto;
-            padding: 20px;
-        }
-        
-        .sidebar h2 {
-            margin: 0 0 20px 0;
-            font-size: 18px;
-        }
-        
-        .subscription-section {
-            margin-bottom: 30px;
-        }
-        
-        .subscription-section h3 {
-            font-size: 14px;
-            text-transform: uppercase;
-            color: #666;
-            margin: 0 0 10px 0;
-        }
-        
-        .subscription-option {
-            margin-bottom: 10px;
-        }
-        
-        .subscription-option label {
-            display: flex;
-            align-items: center;
-            cursor: pointer;
-            padding: 8px;
-            border-radius: 6px;
-            transition: background-color 0.2s;
-        }
-        
-        .subscription-option label:hover {
-            background-color: #f6f8fa;
-        }
-        
-        .subscription-option input[type="radio"] {
-            margin-right: 8px;
-        }
-        
-        .subscription-input {
-            margin-top: 10px;
-        }
-        
-        .subscription-input input {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #e1e4e8;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        
-        .input-with-lookup {
-            position: relative;
-        }
-        
-        .lookup-status {
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 12px;
-        }
-        
-        .lookup-status.loading {
-            color: #0366d6;
-        }
-        
-        .lookup-status.success {
-            color: #28a745;
-        }
-        
-        .lookup-status.error {
-            color: #d73a49;
-        }
-        
-        .filter-section {
-            margin-bottom: 20px;
-            padding-bottom: 20px;
-            border-bottom: 1px solid #e1e4e8;
-        }
-        
-        .filter-group {
-            margin-bottom: 15px;
-        }
-        
-        .filter-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 500;
-            font-size: 14px;
-        }
-        
-        .filter-group input, .filter-group select {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #e1e4e8;
-            border-radius: 6px;
-            font-size: 14px;
-        }
-        
-        .apply-btn {
-            width: 100%;
-            padding: 10px;
-            background-color: #2ea44f;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        
-        .apply-btn:hover {
-            background-color: #2c974b;
-        }
-        
-        .apply-btn:disabled {
-            background-color: #94d3a2;
-            cursor: not-allowed;
-        }
-        
-        .help-text {
-            font-size: 12px;
-            color: #666;
-            margin-top: 4px;
-        }
-        
-        /* Main Content */
-        .main-content {
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-        
-        /* Header */
-        .header {
-            background: white;
-            border-bottom: 1px solid #e1e4e8;
-            padding: 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .header h1 {
-            margin: 0;
-            font-size: 24px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        
-        .connection-status {
-            display: inline-flex;
-            align-items: center;
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            font-weight: 500;
-            gap: 6px;
-        }
-        
-        .connection-status::before {
-            content: '';
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-        
-        .connection-status.connected {
-            background-color: #d1f5d3;
-            color: #1a7f37;
-        }
-        
-        .connection-status.connected::before {
-            background-color: #2ea44f;
-        }
-        
-        .connection-status.disconnected {
-            background-color: #ffebe9;
-            color: #cf222e;
-        }
-        
-        .connection-status.disconnected::before {
-            background-color: #d1242f;
-        }
-        
-        .connection-status.connecting {
-            background-color: #fff8c5;
-            color: #9a6700;
-        }
-        
-        .connection-status.connecting::before {
-            background-color: #ffc107;
-            animation: pulse 1.5s infinite;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-        
-        /* Stats Bar */
-        .stats-bar {
-            background: white;
-            border-bottom: 1px solid #e1e4e8;
-            padding: 15px 20px;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-        }
-        
-        .stat-item {
-            text-align: center;
-        }
-        
-        .stat-label {
-            font-size: 12px;
-            color: #666;
-            text-transform: uppercase;
-            margin-bottom: 5px;
-        }
-        
-        .stat-value {
-            font-size: 24px;
-            font-weight: 600;
-            color: #24292e;
-        }
-        
-        /* Events Container */
-        .events-container {
-            flex: 1;
-            overflow-y: auto;
-            background: white;
-            padding: 20px;
-        }
-        
-        .events-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-        
-        .events-header h2 {
-            margin: 0;
-            font-size: 18px;
-        }
-        
-        .clear-btn {
-            padding: 6px 12px;
-            background-color: #dc3545;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 12px;
-            cursor: pointer;
-            transition: background-color 0.2s;
-        }
-        
-        .clear-btn:hover {
-            background-color: #c82333;
-        }
-        
-        /* Event Items */
-        .event-item {
-            background: #f6f8fa;
-            border: 1px solid #e1e4e8;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 10px;
-            transition: all 0.2s;
-            animation: slideIn 0.3s ease-out;
-        }
-        
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateX(-20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateX(0);
-            }
-        }
-        
-        .event-item:hover {
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            transform: translateY(-1px);
-        }
-        
-        .event-header-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 8px;
-        }
-        
-        .event-badges {
-            display: flex;
-            gap: 8px;
-            align-items: center;
-        }
-        
-        .event-type {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-        
-        /* Event type colors */
-        .event-type.pull_request { background: #6f42c1; color: white; }
-        .event-type.pull_request_review { background: #8b5cf6; color: white; }
-        .event-type.issues { background: #d73a49; color: white; }
-        .event-type.issue_comment { background: #e85d75; color: white; }
-        .event-type.push { background: #28a745; color: white; }
-        .event-type.release { background: #0366d6; color: white; }
-        .event-type.create { background: #34d399; color: white; }
-        .event-type.delete { background: #f59e0b; color: white; }
-        .event-type.star { background: #fbbf24; color: white; }
-        .event-type.watch { background: #60a5fa; color: white; }
-        .event-type.fork { background: #a78bfa; color: white; }
-        
-        .event-action {
-            background: #e1e4e8;
-            color: #24292e;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 11px;
-        }
-        
-        .event-time {
-            color: #666;
-            font-size: 12px;
-        }
-        
-        .event-details {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        
-        .event-repo {
-            font-weight: 500;
-            color: #0366d6;
-            text-decoration: none;
-        }
-        
-        .event-repo:hover {
-            text-decoration: underline;
-        }
-        
-        .event-description {
-            color: #666;
-            font-size: 14px;
-        }
-        
-        .event-user {
-            color: #666;
-            font-size: 12px;
-        }
-        
-        .event-user a {
-            color: #0366d6;
-            text-decoration: none;
-        }
-        
-        .event-user a:hover {
-            text-decoration: underline;
-        }
-        
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: 60px 20px;
-            color: #666;
-        }
-        
-        .empty-state h3 {
-            margin: 0 0 10px 0;
-            font-size: 18px;
-            color: #24292e;
-        }
-        
-        /* Loading Spinner */
-        .spinner {
-            display: inline-block;
-            width: 16px;
-            height: 16px;
-            border: 2px solid #e1e4e8;
-            border-radius: 50%;
-            border-top-color: #0366d6;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        
-        /* Responsive */
-        @media (max-width: 768px) {
-            .container {
-                grid-template-columns: 1fr;
-            }
-            
-            .sidebar {
-                display: none;
-            }
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Octoflow: live GitHub events</title>
+<style>
+:root {
+    --bg: #f6f7f9; --panel: #ffffff; --ink: #1c2128; --muted: #5c6672; --line: #dde1e6;
+    --accent: #0b62d6; --accent-ink: #ffffff; --soft: #eef2f7; --code-bg: #10151c; --code-ink: #e6edf3;
+    --ok: #1a7f37; --warn: #9a6700; --bad: #c62828;
+    --human: #0b62d6; --ci: #6b7280; --code: #7a3fc4; --talk: #0f766e;
+}
+@media (prefers-color-scheme: dark) {
+    :root {
+        --bg: #0e1116; --panel: #171b22; --ink: #e6edf3; --muted: #9aa5b1; --line: #2b323c;
+        --accent: #5aa2ff; --accent-ink: #0e1116; --soft: #1f2530; --code-bg: #0a0d12; --code-ink: #e6edf3;
+        --ok: #4ac26b; --warn: #d4a72c; --bad: #ff7b72;
+        --human: #5aa2ff; --ci: #8b949e; --code: #b58cf0; --talk: #4fd1c5;
+    }
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 20px; }
+
+header.top { background: var(--panel); border-bottom: 1px solid var(--line); }
+header.top .wrap { display: flex; align-items: center; gap: 20px; padding-top: 12px; padding-bottom: 12px; flex-wrap: wrap; }
+.brand { font-weight: 700; font-size: 18px; }
+header.top nav { display: flex; gap: 16px; margin-left: auto; flex-wrap: wrap; }
+
+.hero { padding-top: 28px; padding-bottom: 8px; }
+.hero h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.2; }
+.hero p { margin: 0; color: var(--muted); max-width: 70ch; }
+.facts { display: flex; gap: 12px; flex-wrap: wrap; margin: 18px 0 0; padding: 0; list-style: none; }
+.facts li { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; min-width: 150px; }
+.facts b { display: block; font-size: 20px; }
+.facts span { color: var(--muted); font-size: 13px; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 20px; margin: 20px auto 40px; align-items: start; }
+@media (max-width: 1000px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.card > h2 { margin: 0; padding: 14px 16px; font-size: 16px; border-bottom: 1px solid var(--line); }
+.card .body { padding: 14px 16px; }
+.use { position: sticky; top: 12px; }
+@media (max-width: 1000px) { .use { position: static; } }
+
+.finder { display: flex; gap: 8px; }
+.finder input { flex: 1; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
+.btn { padding: 8px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); display: inline-block; }
+.btn:hover { background: var(--soft); text-decoration: none; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+.btn.small { padding: 3px 10px; font-size: 13px; }
+.hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.finder-status { font-size: 13px; margin: 8px 0 0; min-height: 1.5em; }
+.finder-status.bad { color: var(--bad); }
+
+.scope { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--soft); }
+.scope strong { font-size: 15px; }
+.scope .path { color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--warn); display: inline-block; }
+.dot.connected { background: var(--ok); }
+.dot.disconnected { background: var(--bad); }
+.scope .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+.chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 12px 16px 0; }
+.chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 10px; font-size: 13px; }
+.chip[aria-pressed="false"] { opacity: .55; text-decoration: line-through; }
+.chip b { font-weight: 600; margin-left: 4px; color: var(--muted); }
+.chip.group { font-weight: 600; }
+.facets { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 12px 16px 4px; }
+@media (max-width: 640px) { .facets { grid-template-columns: 1fr; } }
+.facets h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.facets ol { margin: 0; padding: 0; list-style: none; }
+.facets li { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; padding: 1px 0; }
+.facets li button { background: none; border: 0; padding: 0; color: var(--accent); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facets li button:hover { text-decoration: underline; }
+.facets li span { color: var(--muted); }
+
+.banner { margin: 12px 16px 0; padding: 8px 12px; border-radius: 8px; background: var(--soft); font-size: 13px; display: flex; gap: 10px; align-items: center; }
+.banner[hidden] { display: none; }
+#events { list-style: none; margin: 12px 0 0; padding: 0; }
+#events > li { border-top: 1px solid var(--line); }
+.row { display: grid; grid-template-columns: 74px 190px minmax(0, 1fr); gap: 10px; width: 100%; text-align: left; background: none; border: 0; padding: 9px 16px; align-items: baseline; }
+.row:hover { background: var(--soft); }
+@media (max-width: 640px) { .row { grid-template-columns: 64px minmax(0, 1fr); } .row .what { grid-column: 1 / -1; } }
+.time { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.badge { font-size: 12px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; display: inline-block; }
+.badge.human { color: var(--human); } .badge.ci { color: var(--ci); } .badge.code { color: var(--code); } .badge.talk { color: var(--talk); }
+.what { min-width: 0; }
+.what .title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.what .meta { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail { padding: 4px 16px 16px; }
+.detail h4 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.follow { display: flex; gap: 6px; flex-wrap: wrap; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 14px; font-size: 13px; margin: 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+pre { background: var(--code-bg); color: var(--code-ink); border-radius: 8px; padding: 12px; margin: 0; overflow: auto; max-height: 420px; white-space: pre; }
+.empty { padding: 28px 16px; color: var(--muted); text-align: center; }
+.empty[hidden] { display: none; }
+.empty b { color: var(--ink); display: block; margin-bottom: 4px; }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 8px; }
+.tabs button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 10px; font-size: 13px; }
+.tabs button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.url { display: flex; gap: 6px; margin-bottom: 12px; }
+.url input { flex: 1; min-width: 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+#code { white-space: pre-wrap; overflow-wrap: anywhere; }
+.use ul { margin: 12px 0 0; padding-left: 18px; font-size: 13px; color: var(--muted); }
+.use ul code, .ref p code { background: var(--soft); padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+.opts { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; font-size: 13px; align-items: center; }
+.opts input { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); font: inherit; }
+.opts input[type=number] { width: 70px; }
+.opts input[type=text] { width: 150px; }
+
+section.ref { margin: 0 auto 60px; }
+section.ref h2 { font-size: 20px; margin: 0 0 6px; }
+section.ref > p { color: var(--muted); margin: 0 0 14px; max-width: 75ch; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 12px; border-top: 1px solid var(--line); vertical-align: top; }
+thead th { border-top: 0; color: var(--muted); font-weight: 600; }
+td code { white-space: nowrap; }
+footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--muted); font-size: 13px; }
+.sr { position: absolute; left: -9999px; }
+</style>
 </head>
 <body>
-    <div class="container">
-        <!-- Sidebar -->
-        <div class="sidebar">
-            <h2>Subscription Settings</h2>
-            
-            <div class="subscription-section">
-                <h3>Subscribe to:</h3>
-                <div class="subscription-option">
-                    <label>
-                        <input type="radio" name="subscription" value="all" checked>
-                        All Events (Firehose)
-                    </label>
-                </div>
-                <div class="subscription-option">
-                    <label>
-                        <input type="radio" name="subscription" value="org">
-                        Organization Events
-                    </label>
-                    <div class="subscription-input" id="org-input" style="display: none;">
-                        <div class="input-with-lookup">
-                            <input type="text" id="org-name" placeholder="Enter org name or ID">
-                            <span class="lookup-status" id="org-lookup-status"></span>
-                        </div>
-                        <div class="help-text">e.g., "octocat" or "123456"</div>
-                        <input type="hidden" id="org-id">
-                    </div>
-                </div>
-                <div class="subscription-option">
-                    <label>
-                        <input type="radio" name="subscription" value="repo">
-                        Repository Events
-                    </label>
-                    <div class="subscription-input" id="repo-input" style="display: none;">
-                        <div class="input-with-lookup">
-                            <input type="text" id="repo-name" placeholder="Enter owner/repo or ID">
-                            <span class="lookup-status" id="repo-lookup-status"></span>
-                        </div>
-                        <div class="help-text">e.g., "octocat/hello-world" or "123456789"</div>
-                        <input type="hidden" id="repo-id">
-                    </div>
-                </div>
-                <div class="subscription-option">
-                    <label>
-                        <input type="radio" name="subscription" value="user">
-                        User Activity
-                    </label>
-                    <div class="subscription-input" id="user-input" style="display: none;">
-                        <div class="input-with-lookup">
-                            <input type="text" id="user-name" placeholder="Enter username or ID">
-                            <span class="lookup-status" id="user-lookup-status"></span>
-                        </div>
-                        <div class="help-text">e.g., "octocat" or "583231"</div>
-                        <input type="hidden" id="user-id">
-                    </div>
-                </div>
-                <div class="subscription-option">
-                    <label>
-                        <input type="radio" name="subscription" value="pr">
-                        Pull Request Events
-                    </label>
-                    <div class="subscription-input" id="pr-input" style="display: none;">
-                        <div class="input-with-lookup">
-                            <input type="text" id="pr-repo-name" placeholder="Enter owner/repo or ID">
-                            <span class="lookup-status" id="pr-repo-lookup-status"></span>
-                        </div>
-                        <input type="hidden" id="pr-repo-id">
-                        <input type="text" id="pr-number" placeholder="PR Number" style="margin-top: 5px;">
-                    </div>
-                </div>
-                <div class="subscription-option">
-                    <label>
-                        <input type="radio" name="subscription" value="issue">
-                        Issue Events
-                    </label>
-                    <div class="subscription-input" id="issue-input" style="display: none;">
-                        <div class="input-with-lookup">
-                            <input type="text" id="issue-repo-name" placeholder="Enter owner/repo or ID">
-                            <span class="lookup-status" id="issue-repo-lookup-status"></span>
-                        </div>
-                        <input type="hidden" id="issue-repo-id">
-                        <input type="text" id="issue-number" placeholder="Issue Number" style="margin-top: 5px;">
-                    </div>
-                </div>
-            </div>
-            
-            <div class="filter-section">
-                <h3>Filters</h3>
-                <div class="filter-group">
-                    <label for="event-type-filter">Event Types</label>
-                    <input type="text" id="event-type-filter" placeholder="e.g., push,pull_request">
-                </div>
-                <div class="filter-group">
-                    <label for="action-filter">Actions</label>
-                    <input type="text" id="action-filter" placeholder="e.g., opened,closed">
-                </div>
-            </div>
-            
-            <button class="apply-btn" id="apply-btn" onclick="applySubscription()">Apply & Connect</button>
+<header class="top">
+    <div class="wrap">
+        <span class="brand">Octoflow</span>
+        <nav aria-label="Sections">
+            <a href="#explore">Explore</a>
+            <a href="#use">Use a stream</a>
+            <a href="#reference">Routes and fields</a>
+            <a href="https://github.com/zimbatm/octoflow/blob/main/docs/README.md" rel="noopener">Documentation</a>
+        </nav>
+    </div>
+</header>
+
+<div class="wrap hero">
+    <h1>Every GitHub event of an organization, as a live stream.</h1>
+    <p>Octoflow stores the webhook events of the organizations that send them here, and serves them over
+       Server-Sent Events. You can follow everything, or one repository, user, pull request or issue.
+       No key is necessary. Look at the data below, then copy the snippet for the stream you see.</p>
+    <ul class="facts">
+        <li><b id="fact-stored">-</b><span id="fact-stored-label">events stored</span></li>
+        <li><b id="fact-rate">-</b><span>events in the last minute, this stream</span></li>
+        <li><b id="fact-clients">-</b><span>open streams on this server</span></li>
+    </ul>
+</div>
+
+<div class="wrap grid">
+    <main class="card" id="explore">
+        <h2>Explore the events</h2>
+        <div class="body">
+            <form class="finder" id="finder">
+                <label class="sr" for="find">Open a stream</label>
+                <input id="find" autocomplete="off" spellcheck="false" placeholder="owner/repo, owner/repo#123, @user, organization, type:push">
+                <button class="btn primary" type="submit">Open stream</button>
+                <button class="btn" type="button" id="everything">Everything</button>
+            </form>
+            <p class="finder-status" id="finder-status" role="status"></p>
+            <p class="hint">Or select an event in the list: each one links to the streams of its repository, its author and its pull request or issue.</p>
         </div>
-        
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Header -->
-            <div class="header">
-                <h1>
-                    Octoflow Events
-                    <span class="connection-status connecting" id="connection-status">Connecting...</span>
-                </h1>
-                <div id="subscription-info"></div>
+
+        <div class="scope">
+            <span class="dot" id="dot" title="connecting"></span>
+            <strong id="scope-name">Everything</strong>
+            <code class="path" id="scope-path">/events</code>
+            <span class="right">
+                <span class="time" id="shown-count"></span>
+                <button class="btn small" id="pause" type="button" aria-pressed="false">Pause</button>
+            </span>
+        </div>
+
+        <div class="chips" id="chips" aria-label="Event types in this stream. Select one to hide or show it."></div>
+        <div class="facets">
+            <div><h3>Most active repositories here</h3><ol id="top-repos"></ol></div>
+            <div><h3>Most active people here</h3><ol id="top-people"></ol></div>
+        </div>
+        <div class="banner" id="banner" hidden>
+            <span id="banner-text"></span>
+            <button class="btn small" id="banner-btn" type="button">Resume</button>
+        </div>
+        <ol id="events" aria-label="Events, newest first"></ol>
+        <div class="empty" id="empty"><b>Connecting to the stream</b>Events appear here when they arrive.</div>
+    </main>
+
+    <aside class="card use" id="use">
+        <h2>Use this stream</h2>
+        <div class="body">
+            <div class="opts">
+                <label>Replay the last <input type="number" id="opt-last" min="0" max="1000" value="10"> events</label>
+                <label>Only types <input type="text" id="opt-type" placeholder="push,issues" spellcheck="false"></label>
             </div>
-            
-            <!-- Stats Bar -->
-            <div class="stats-bar">
-                <div class="stat-item">
-                    <div class="stat-label">Events Stored</div>
-                    <div class="stat-value" id="events-stored" title="Events in the stream, without the fan-out copies">-</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Shown Here</div>
-                    <div class="stat-value" id="events-shown" title="Events of the active stream that this page received">0</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Events/Min</div>
-                    <div class="stat-value" id="events-per-minute">0</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Connected Clients</div>
-                    <div class="stat-value" id="connected-clients">-</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Active Stream</div>
-                    <div class="stat-value" id="active-stream">Firehose</div>
-                </div>
+            <div class="url">
+                <label class="sr" for="url">Stream URL</label>
+                <input id="url" class="mono" readonly>
+                <button class="btn" id="copy-url" type="button">Copy</button>
             </div>
-            
-            <!-- Events -->
-            <div class="events-container">
-                <div class="events-header">
-                    <h2>Live Events</h2>
-                    <button class="clear-btn" onclick="clearEvents()">Clear Events</button>
-                </div>
-                <div id="events-list">
-                    <div class="empty-state">
-                        <h3>Connecting to event stream...</h3>
-                        <p>Events will appear here as they are received.</p>
-                    </div>
-                </div>
+            <div class="tabs" role="tablist" aria-label="Language">
+                <button role="tab" aria-selected="true" data-lang="curl">curl</button>
+                <button role="tab" aria-selected="false" data-lang="js">JavaScript</button>
+                <button role="tab" aria-selected="false" data-lang="python">Python</button>
+                <button class="btn small" id="copy-code" type="button" style="margin-left:auto">Copy</button>
             </div>
+            <pre id="code"></pre>
+            <ul>
+                <li>Each message is one JSON object: <code>event</code>, <code>action</code>, <code>repository</code>, <code>sender</code> and the full GitHub <code>payload</code>.</li>
+                <li><code>last=N</code> replays the last N events of the stream before new ones, 1000 at most.</li>
+                <li>A browser that reconnects continues where it stopped. Other clients send <code>Last-Event-ID</code> with the last <code>id</code> they read.</li>
+                <li>The paths use numeric GitHub ids, so a renamed repository keeps its stream.</li>
+            </ul>
+        </div>
+    </aside>
+</div>
+
+<section class="wrap ref" id="reference">
+    <h2>Routes and fields</h2>
+    <p>All routes answer <code>GET</code> with <code>text/event-stream</code> and permit requests from any origin.
+       The <a href="https://github.com/zimbatm/octoflow/blob/main/docs/reference/sse-api.md" rel="noopener">SSE API reference</a>
+       and the <a href="https://github.com/zimbatm/octoflow/blob/main/docs/reference/event-format.md" rel="noopener">event format</a> have the details.</p>
+    <div class="cols">
+        <div class="card">
+            <table>
+                <thead><tr><th>Route</th><th>Events</th></tr></thead>
+                <tbody>
+                    <tr><td><code>/events</code></td><td>everything, one time each</td></tr>
+                    <tr><td><code>/events/org/{org_id}</code></td><td>one organization</td></tr>
+                    <tr><td><code>/events/repo/{repo_id}</code></td><td>one repository</td></tr>
+                    <tr><td><code>/events/user/{user_id}</code></td><td>events that involve one user: sender, author, assignee, reviewer</td></tr>
+                    <tr><td><code>/events/pr/{repo_id}/{number}</code></td><td>one pull request and its reviews</td></tr>
+                    <tr><td><code>/events/issue/{repo_id}/{number}</code></td><td>one issue and its comments</td></tr>
+                    <tr><td><code>/events/type/{event_type}</code></td><td>one GitHub event type, for example <code>push</code></td></tr>
+                    <tr><td><code>?last=N</code></td><td>replay before the live events; default 50, <code>0</code> for none</td></tr>
+                    <tr><td><code>?type=a,b</code> <code>?action=x,y</code></td><td>keep only these event types or actions</td></tr>
+                    <tr><td><code>/stats</code></td><td>JSON: stored events and open streams</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="card">
+            <table>
+                <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+                <tbody>
+                    <tr><td><code>id</code></td><td>the delivery id of GitHub</td></tr>
+                    <tr><td><code>event</code>, <code>action</code></td><td>the GitHub event type and its action, for example <code>pull_request</code> and <code>opened</code></td></tr>
+                    <tr><td><code>received_at</code></td><td>when Octoflow received it, UTC</td></tr>
+                    <tr><td><code>repository</code>, <code>repository_id</code></td><td>full name and numeric id</td></tr>
+                    <tr><td><code>organization</code>, <code>organization_id</code></td><td>login and numeric id</td></tr>
+                    <tr><td><code>sender</code>, <code>sender_id</code></td><td>the user that caused the event</td></tr>
+                    <tr><td><code>payload</code></td><td>the GitHub webhook payload, not changed.
+                        <a href="https://docs.github.com/en/webhooks/webhook-events-and-payloads" rel="noopener">GitHub documents each type.</a></td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
-    
-    <script>
-        const SSE_BASE = (new URLSearchParams(location.search).get('sse') || location.origin).replace(/\/+$/, '');
-        let eventSource = null;
-        let lastUrl = null;
-        let stats = { total: 0, timestamps: [] };
-        // ids already shown: a reconnect replays the last events
-        const seen = new Set();
-        const SEEN_MAX = 2000;
-        const lookupCache = {};
-        const lookupSeq = {};
+</section>
 
-        // one row per subscription kind that resolves a GitHub name to an id
-        const lookups = {
-            org: { name: 'org-name', id: 'org-id', status: 'org-lookup-status', api: v => `/orgs/${v}`, label: d => d.name || d.login },
-            repo: { name: 'repo-name', id: 'repo-id', status: 'repo-lookup-status', api: v => `/repos/${v}`, label: d => d.full_name },
-            user: { name: 'user-name', id: 'user-id', status: 'user-lookup-status', api: v => `/users/${v}`, label: d => d.name || d.login },
-            pr: { name: 'pr-repo-name', id: 'pr-repo-id', status: 'pr-repo-lookup-status', api: v => `/repos/${v}`, label: d => d.full_name },
-            issue: { name: 'issue-repo-name', id: 'issue-repo-id', status: 'issue-repo-lookup-status', api: v => `/repos/${v}`, label: d => d.full_name },
-        };
+<footer><div class="wrap">Octoflow is open source: <a href="https://github.com/zimbatm/octoflow" rel="noopener">github.com/zimbatm/octoflow</a>.
+    The events are public GitHub activity of organizations that chose to send them here.</div></footer>
 
-        // everything from GitHub payloads goes through here before innerHTML
-        function esc(s) {
-            return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+<script>
+const SSE_BASE = (new URLSearchParams(location.search).get('sse') || location.origin).replace(/\/+$/, '');
+const BUFFER_MAX = 300;     // events kept in the page, with their payloads
+const REPLAY = 200;         // asked from the server when a stream opens
+const GROUPS = {
+    ci: ['workflow_job', 'workflow_run', 'check_run', 'check_suite', 'status', 'deployment', 'deployment_status', 'merge_group'],
+    code: ['push', 'create', 'delete', 'release', 'fork', 'repository'],
+    talk: ['issue_comment', 'pull_request_review', 'pull_request_review_comment', 'discussion', 'discussion_comment', 'commit_comment'],
+};
+const groupOf = type => Object.keys(GROUPS).find(g => GROUPS[g].includes(type)) || 'human';
+const EVERYTHING = { kind: 'all', label: 'Everything', path: '/events' };
+
+let es = null;
+let scope = EVERYTHING;
+let buffer = [];            // newest first
+let held = [];              // arrived while paused
+let paused = false;
+let openId = null;          // the event whose detail is shown
+let hidden = new Set(GROUPS.ci);
+let lang = 'curl';
+const seen = new Set();
+const $ = id => document.getElementById(id);
+
+// every node is built here: GitHub text never goes through innerHTML
+function el(tag, props, ...kids) {
+    const n = document.createElement(tag);
+    for (const [k, v] of Object.entries(props || {})) {
+        if (k === 'class') n.className = v;
+        else if (k === 'on') for (const [ev, fn] of Object.entries(v)) n.addEventListener(ev, fn);
+        else if (v !== null && v !== undefined && v !== false) n.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) if (kid !== null && kid !== undefined && kid !== false) n.append(kid);
+    return n;
+}
+
+// only links that GitHub gave as https go into an href
+const web = url => (typeof url === 'string' && url.startsWith('https://') ? url : null);
+
+// ---- what an event is about --------------------------------------------
+
+function describe(ev) {
+    const p = ev.payload || {};
+    const first = s => String(s || '').split('\n')[0];
+    const pr = p.pull_request, issue = p.issue;
+    switch (ev.event) {
+        case 'pull_request': return { title: `#${pr.number} ${pr.title}`, url: pr.html_url, state: pr.merged ? 'merged' : ev.action };
+        case 'pull_request_review': return { title: `Review of #${pr.number} ${pr.title}`, url: p.review && p.review.html_url, state: p.review && p.review.state };
+        case 'pull_request_review_comment': return { title: `Review comment on #${pr.number} ${pr.title}`, url: p.comment && p.comment.html_url, state: ev.action };
+        case 'issues': return { title: `#${issue.number} ${issue.title}`, url: issue.html_url, state: ev.action };
+        case 'issue_comment': return { title: `Comment on #${issue.number} ${issue.title}`, url: p.comment && p.comment.html_url, state: ev.action };
+        case 'push': {
+            const n = p.size ?? (p.commits ? p.commits.length : 0);
+            const head = p.head_commit ? ': ' + first(p.head_commit.message) : '';
+            // the webhook payload lists at most 20 commits and no count; the Events API has size
+            return { title: `${n === 20 && p.size == null ? '20+' : n} commit(s) to ${String(p.ref || '').replace('refs/heads/', '')}${head}`, url: p.compare };
         }
+        case 'create': case 'delete': return { title: `${p.ref_type} ${p.ref}`, state: ev.event + 'd' };
+        case 'release': return { title: `Release ${p.release.tag_name} ${p.release.name || ''}`, url: p.release.html_url, state: ev.action };
+        case 'fork': return { title: `Fork to ${p.forkee && p.forkee.full_name}`, url: p.forkee && p.forkee.html_url };
+        case 'workflow_run': return { title: `Workflow ${p.workflow_run.name}`, url: p.workflow_run.html_url, state: p.workflow_run.conclusion || p.workflow_run.status };
+        case 'workflow_job': return { title: `Job ${p.workflow_job.name}`, url: p.workflow_job.html_url, state: p.workflow_job.conclusion || p.workflow_job.status };
+        case 'check_run': return { title: `Check ${p.check_run.name}`, url: p.check_run.html_url, state: p.check_run.conclusion || p.check_run.status };
+        case 'check_suite': return { title: `Check suite on ${p.check_suite.head_branch || String(p.check_suite.head_sha).slice(0, 7)}`, state: p.check_suite.conclusion || p.check_suite.status };
+        case 'status': return { title: `Status ${p.context}`, url: p.target_url, state: p.state };
+        case 'merge_group': return { title: `Merge queue ${p.merge_group ? p.merge_group.head_ref : ''}`, state: ev.action };
+        case 'star': case 'watch': return { title: 'Star', state: ev.action };
+        default: return { title: ev.event.replace(/_/g, ' '), state: ev.action };
+    }
+}
 
-        function $(id) { return document.getElementById(id); }
+// a payload in a shape this page does not know still gets a row
+function safeDescribe(ev) {
+    try { return describe(ev); } catch (e) { return { title: ev.event.replace(/_/g, ' '), state: ev.action }; }
+}
 
-        document.addEventListener('DOMContentLoaded', () => {
-            document.querySelectorAll('input[name="subscription"]').forEach(radio => {
-                radio.addEventListener('change', () => {
-                    document.querySelectorAll('.subscription-input').forEach(div => { div.style.display = 'none'; });
-                    const div = $(radio.value + '-input');
-                    if (div) div.style.display = 'block';
-                });
-            });
-            for (const [kind, f] of Object.entries(lookups)) {
-                $(f.name).addEventListener('input', debounce(e => lookup(kind, e.target.value.trim()), 500));
-            }
-            applySubscription();
-            setInterval(updateStats, 1000);
-            setInterval(fetchStats, 5000);
-        });
+// the streams that hold this event, as scopes
+function streamsOf(ev) {
+    const p = ev.payload || {};
+    const out = [];
+    if (ev.repository_id) out.push({ kind: 'repo', label: ev.repository, path: `/events/repo/${ev.repository_id}` });
+    const prNumber = p.pull_request && p.pull_request.number;
+    if (prNumber && ev.repository_id) out.push({ kind: 'pr', label: `${ev.repository}#${prNumber}`, path: `/events/pr/${ev.repository_id}/${prNumber}` });
+    if (p.issue && ev.repository_id) out.push({ kind: 'issue', label: `${ev.repository}#${p.issue.number}`, path: `/events/issue/${ev.repository_id}/${p.issue.number}` });
+    if (ev.sender_id) out.push({ kind: 'user', label: '@' + ev.sender, path: `/events/user/${ev.sender_id}` });
+    if (ev.organization_id) out.push({ kind: 'org', label: ev.organization, path: `/events/org/${ev.organization_id}` });
+    if (/^[a-z_]+$/.test(ev.event)) out.push({ kind: 'type', label: `type ${ev.event}`, path: `/events/type/${ev.event}` });
+    return out;
+}
 
-        function debounce(func, wait) {
-            let timeout;
-            return (...args) => {
-                clearTimeout(timeout);
-                timeout = setTimeout(() => func(...args), wait);
-            };
-        }
+// ---- the stream ------------------------------------------------------------
 
-        function setStatus(f, text, cls) {
-            const el = $(f.status);
-            el.textContent = text;
-            el.className = 'lookup-status ' + cls;
-        }
+function open(next) {
+    scope = next;
+    buffer = []; held = []; seen.clear(); openId = null;
+    // CI is most of a repository's traffic; it stays out of sight until asked for,
+    // except on the streams where it is the point
+    hidden = new Set(['all', 'org', 'repo', 'user'].includes(scope.kind) ? GROUPS.ci : []);
+    setPaused(false);
+    $('scope-name').textContent = scope.label;
+    $('scope-path').textContent = scope.path;
+    history.replaceState(null, '', '#' + encodeURIComponent(JSON.stringify(scope)));
+    $('empty').replaceChildren(el('b', {}, 'Connecting to the stream'), 'Events appear here when they arrive.');
+    render(true);
+    renderUse();
+    if (es) es.close();
+    setDot('connecting');
+    es = new EventSource(`${SSE_BASE}${scope.path}?last=${REPLAY}`);
+    es.onopen = () => { setDot('connected'); fetchStats(); };
+    // fires for network trouble and for the server's own `error` event
+    es.onerror = () => setDot('disconnected');
+    // GitHub events carry no event name, so one handler sees every type
+    es.onmessage = m => receive(JSON.parse(m.data));
+    // the replay follows `connected` at once; nothing after a moment means an empty stream
+    es.addEventListener('connected', () => setTimeout(() => { if (!buffer.length) render(); }, 1500));
+}
 
-        async function lookup(kind, value) {
-            const f = lookups[kind];
-            // a later keystroke makes this lookup stale; its answer is dropped
-            const seq = (lookupSeq[kind] = (lookupSeq[kind] || 0) + 1);
-            $(f.id).value = '';
-            if (!value) {
-                setStatus(f, '', '');
-                return;
-            }
-            if (/^\d+$/.test(value)) {
-                $(f.id).value = value;
-                setStatus(f, '✓ Using ID', 'success');
-                return;
-            }
-            const cacheKey = `${kind}:${value}`;
-            if (lookupCache[cacheKey]) {
-                $(f.id).value = lookupCache[cacheKey].id;
-                setStatus(f, `✓ ${f.label(lookupCache[cacheKey])}`, 'success');
-                return;
-            }
-            setStatus(f, 'Looking up...', 'loading');
-            try {
-                const response = await fetch('https://api.github.com' + f.api(value));
-                if (seq !== lookupSeq[kind]) return;
-                if (!response.ok) {
-                    setStatus(f, '✗ Not found', 'error');
-                    return;
-                }
-                const data = await response.json();
-                if (seq !== lookupSeq[kind]) return;
-                lookupCache[cacheKey] = data;
-                $(f.id).value = data.id;
-                setStatus(f, `✓ ${f.label(data)}`, 'success');
-            } catch (error) {
-                if (seq !== lookupSeq[kind]) return;
-                console.error('GitHub API error:', error);
-                setStatus(f, '✗ Error', 'error');
-            }
-        }
+function receive(ev) {
+    if (seen.has(ev.id)) return;      // a reconnect replays
+    seen.add(ev.id);
+    ev._t = Date.parse(ev.received_at) || Date.now();
+    if (paused) {
+        held.unshift(ev);
+        if (held.length > BUFFER_MAX) held.pop();
+        showBanner();
+        return;
+    }
+    buffer.unshift(ev);
+    while (buffer.length > BUFFER_MAX) seen.delete(evict().id);
+    scheduleRender();
+}
 
-        function applySubscription() {
-            const kind = document.querySelector('input[name="subscription"]:checked').value;
-            const shown = f => {
-                const name = $(f.name).value.trim();
-                return /^\d+$/.test(name) ? $(f.id).value : name;
-            };
-            let path, streamName;
-            switch (kind) {
-                case 'all':
-                    path = '/events';
-                    streamName = 'Firehose';
-                    break;
-                case 'org':
-                case 'repo':
-                case 'user': {
-                    const f = lookups[kind];
-                    const id = $(f.id).value;
-                    if (!id) {
-                        alert({ org: 'Please enter an organization name or ID', repo: 'Please enter a repository name or ID', user: 'Please enter a username or ID' }[kind]);
-                        return;
-                    }
-                    path = `/events/${kind}/${id}`;
-                    streamName = `${{ org: 'Org', repo: 'Repo', user: 'User' }[kind]}: ${shown(f)}`;
-                    break;
-                }
-                case 'pr':
-                case 'issue': {
-                    const f = lookups[kind];
-                    const id = $(f.id).value;
-                    const n = $(kind + '-number').value.trim();
-                    if (!id || !n) {
-                        alert(`Please enter both repository and ${kind === 'pr' ? 'PR' : 'issue'} number`);
-                        return;
-                    }
-                    path = `/events/${kind}/${id}/${n}`;
-                    streamName = `${kind === 'pr' ? 'PR' : 'Issue'}: ${shown(f)}#${n}`;
-                    break;
-                }
-            }
-            const params = new URLSearchParams();
-            const list = id => $(id).value.split(',').map(s => s.trim()).filter(Boolean).join(',');
-            const types = list('event-type-filter');
-            if (types) params.set('type', types);
-            const actions = list('action-filter');
-            if (actions) params.set('action', actions);
-            const query = params.toString();
-            $('active-stream').textContent = streamName;
-            $('subscription-info').textContent = `Subscribed to: ${streamName}`;
-            // a new subscription starts a new list; replayed events are not repeats
-            clearEvents();
-            connectSSE(SSE_BASE + path + (query ? '?' + query : ''));
-        }
+// hidden types are most of the traffic; they must not push the visible events out
+function evict() {
+    const hiddenCount = buffer.reduce((n, ev) => n + hidden.has(ev.event), 0);
+    if (hiddenCount > BUFFER_MAX / 3) {
+        for (let i = buffer.length - 1; i >= 0; i--) if (hidden.has(buffer[i].event)) return buffer.splice(i, 1)[0];
+    }
+    return buffer.pop();
+}
 
-        function connectSSE(url) {
-            if (eventSource) eventSource.close();
-            lastUrl = url;
-            const applyBtn = $('apply-btn');
-            applyBtn.disabled = true;
-            updateConnectionStatus('connecting');
-            eventSource = new EventSource(url);
-            eventSource.onopen = () => {
-                applyBtn.disabled = false;
-                updateConnectionStatus('connected');
-                fetchStats();
-            };
-            // fires for network trouble and for the server's own `error` event
-            eventSource.onerror = () => {
-                applyBtn.disabled = false;
-                updateConnectionStatus('disconnected');
-            };
-            // GitHub events carry no event name, so one handler sees every type
-            eventSource.onmessage = e => handleEvent(JSON.parse(e.data));
-        }
+let renderTimer = null;
+function scheduleRender() {
+    if (renderTimer) return;
+    renderTimer = setTimeout(() => { renderTimer = null; render(); }, 250);
+}
 
-        function handleEvent(event) {
-            if (seen.has(event.id)) return;
-            seen.add(event.id);
-            if (seen.size > SEEN_MAX) seen.delete(seen.values().next().value);
-            stats.total++;
-            // replayed events count as shown, not toward the rate
-            stats.timestamps.push(Date.parse(event.received_at) || Date.now());
-            const emptyState = document.querySelector('.empty-state');
-            if (emptyState) emptyState.remove();
-            addEventToList(event);
-            updateStats();
-        }
+function setDot(state) {
+    $('dot').className = 'dot ' + state;
+    $('dot').title = state;
+}
 
-        function addEventToList(event) {
-            const eventsList = $('events-list');
-            const eventItem = document.createElement('div');
-            eventItem.className = 'event-item';
-            const timestamp = new Date(event.received_at).toLocaleTimeString();
-            let description = event.action ? `Action: ${event.action}` : '';
-            let prState = '';
-            let issueState = '';
-            try {
-                const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
-                if (payload && payload.pull_request) {
-                    prState = payload.pull_request.merged ? 'merged' : payload.pull_request.state;
-                    description = `PR #${payload.pull_request.number}: ${payload.pull_request.title}`;
-                } else if (payload && payload.issue) {
-                    issueState = payload.issue.state;
-                    description = `Issue #${payload.issue.number}: ${payload.issue.title}`;
-                } else if (payload && payload.ref && event.event === 'push') {
-                    const branch = payload.ref.replace('refs/heads/', '');
-                    // the webhook payload lists at most 20 commits and no count; the Events API has size
-                    const n = payload.size ?? (payload.commits ? payload.commits.length : 0);
-                    const count = payload.size == null && n === 20 ? '20+' : n;
-                    description = `${count} commit(s) to ${branch}`;
-                } else if (payload && payload.release) {
-                    description = `Release ${payload.release.tag_name}: ${payload.release.name}`;
-                } else if (payload && payload.workflow_run) {
-                    description = `Workflow "${payload.workflow_run.name}" ${payload.workflow_run.conclusion || 'running'}`;
-                }
-            } catch (e) {
-                console.error('Error parsing payload:', e);
-            }
-            eventItem.innerHTML = `
-                <div class="event-header-row">
-                    <div class="event-badges">
-                        <span class="event-type ${esc(event.event)}">${esc(event.event.replace(/_/g, ' '))}</span>
-                        ${event.action ? `<span class="event-action">${esc(event.action)}</span>` : ''}
-                        ${prState ? `<span class="event-action">${esc(prState)}</span>` : ''}
-                        ${issueState ? `<span class="event-action">${esc(issueState)}</span>` : ''}
-                    </div>
-                    <span class="event-time">${timestamp}</span>
-                </div>
-                <div class="event-details">
-                    ${event.repository ? `<a href="https://github.com/${esc(encodeURI(event.repository))}" target="_blank" rel="noopener" class="event-repo">${esc(event.repository)}</a>` : ''}
-                    ${description ? `<div class="event-description">${esc(description)}</div>` : ''}
-                    <div class="event-user">
-                        ${event.sender ? `by <a href="https://github.com/${esc(encodeURI(event.sender))}" target="_blank" rel="noopener">${esc(event.sender)}</a>` : ''}
-                        ${event.metadata ? ` • ${Object.entries(event.metadata).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(', ')}` : ''}
-                    </div>
-                </div>
-            `;
-            eventsList.insertBefore(eventItem, eventsList.firstChild);
-            while (eventsList.children.length > 100) {
-                eventsList.removeChild(eventsList.lastChild);
-            }
-        }
+function setPaused(p) {
+    paused = p;
+    $('pause').textContent = p ? 'Resume' : 'Pause';
+    $('pause').setAttribute('aria-pressed', String(p));
+    if (!p && held.length) {
+        buffer = held.concat(buffer).slice(0, BUFFER_MAX);
+        held = [];
+    }
+    showBanner();
+    if (!p) render();
+}
 
-        function updateConnectionStatus(status) {
-            const el = $('connection-status');
-            el.className = `connection-status ${status}`;
-            el.textContent = status.charAt(0).toUpperCase() + status.slice(1);
-        }
+function showBanner() {
+    $('banner').hidden = !paused;
+    $('banner-text').textContent = held.length
+        ? `Paused. ${held.length} new event${held.length === 1 ? '' : 's'} wait.`
+        : 'Paused, so the list does not move while you read.';
+}
 
-        function updateStats() {
-            const oneMinuteAgo = Date.now() - 60000;
-            stats.timestamps = stats.timestamps.filter(ts => ts > oneMinuteAgo);
-            $('events-shown').textContent = stats.total;
-            $('events-per-minute').textContent = stats.timestamps.length;
-        }
+// ---- rendering ---------------------------------------------------------------
 
-        function fetchStats() {
-            fetch(SSE_BASE + '/stats')
-                .then(response => response.json())
-                .then(data => {
-                    $('connected-clients').textContent = data.total_clients ?? '-';
-                    const stored = $('events-stored');
-                    stored.textContent = data.events_stored?.toLocaleString() ?? '-';
-                    if (data.stored_since) {
-                        stored.title = 'Events in the stream since ' + new Date(data.stored_since).toLocaleString() + ', without the fan-out copies';
-                    }
-                })
-                .catch(error => console.error('Error fetching stats:', error));
-        }
+function render(connecting) {
+    const counts = {};
+    for (const ev of buffer) counts[ev.event] = (counts[ev.event] || 0) + 1;
+    renderChips(counts);
+    renderTop('top-repos', ev => ev.repository && ev.repository_id && { label: ev.repository, scope: { kind: 'repo', label: ev.repository, path: `/events/repo/${ev.repository_id}` } });
+    renderTop('top-people', ev => ev.sender && ev.sender_id && { label: '@' + ev.sender, scope: { kind: 'user', label: '@' + ev.sender, path: `/events/user/${ev.sender_id}` } });
 
-        function clearEvents() {
-            $('events-list').innerHTML = `
-                <div class="empty-state">
-                    <h3>Waiting for events</h3>
-                    <p>Events will appear here as they are received.</p>
-                </div>
-            `;
-            stats.total = 0;
-            stats.timestamps = [];
-            seen.clear();
-            updateStats();
-        }
+    const visible = buffer.filter(ev => !hidden.has(ev.event));
+    $('events').replaceChildren(...visible.slice(0, 150).map(row));
+    $('shown-count').textContent = buffer.length ? `${visible.length} of the last ${buffer.length} shown` : '';
+    const empty = $('empty');
+    empty.hidden = visible.length > 0;
+    if (!visible.length && !connecting) {
+        empty.replaceChildren(...(buffer.length
+            ? [el('b', {}, 'All event types of this stream are hidden'), 'Select a type above to show it.']
+            : [el('b', {}, 'No stored event on this stream yet'),
+               'Octoflow only has the events of organizations that send it webhooks. Open “Everything” to see which ones do.']));
+    }
+    updateRate();
+}
 
-        // a stream the browser gave up on comes back when the tab does
-        window.addEventListener('focus', () => {
-            if (eventSource && eventSource.readyState === EventSource.CLOSED && lastUrl) {
-                connectSSE(lastUrl);
-            }
-        });
-    </script>
+function updateRate() {
+    const now = Date.now();
+    $('fact-rate').textContent = buffer.filter(ev => now - ev._t < 60000).length;
+}
+
+function renderChips(counts) {
+    const chips = [];
+    const types = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    const ci = types.filter(t => GROUPS.ci.includes(t));
+    if (ci.length) {
+        const on = ci.some(t => !hidden.has(t));
+        const n = ci.reduce((s, t) => s + counts[t], 0);
+        chips.push(el('button', { class: 'chip group', type: 'button', 'aria-pressed': String(on), title: 'Workflow, check and status events',
+            on: { click: () => { GROUPS.ci.forEach(t => (on ? hidden.add(t) : hidden.delete(t))); render(); } } },
+            'CI and automation', el('b', {}, n)));
+    }
+    for (const t of types) {
+        if (GROUPS.ci.includes(t) && hidden.has(t)) continue;
+        chips.push(el('button', { class: 'chip', type: 'button', 'aria-pressed': String(!hidden.has(t)),
+            on: { click: () => { hidden.has(t) ? hidden.delete(t) : hidden.add(t); render(); } } },
+            t.replace(/_/g, ' '), el('b', {}, counts[t])));
+    }
+    $('chips').replaceChildren(...chips);
+}
+
+function renderTop(id, pick) {
+    const tally = new Map();
+    for (const ev of buffer) {
+        if (hidden.has(ev.event)) continue;
+        const item = pick(ev);
+        if (!item) continue;
+        const cur = tally.get(item.label) || { ...item, n: 0 };
+        cur.n++;
+        tally.set(item.label, cur);
+    }
+    const top = [...tally.values()].sort((a, b) => b.n - a.n).slice(0, 5);
+    $(id).replaceChildren(...(top.length ? top.map(t =>
+        el('li', {}, el('button', { type: 'button', title: `Open the stream of ${t.label}`, on: { click: () => open(t.scope) } }, t.label), el('span', {}, t.n)))
+        : [el('li', {}, el('span', {}, 'none yet'))]));
+}
+
+function row(ev) {
+    const d = safeDescribe(ev);
+    const isOpen = ev.id === openId;
+    const li = el('li', {},
+        el('button', { class: 'row', type: 'button', 'aria-expanded': String(isOpen),
+            on: { click: () => { openId = isOpen ? null : ev.id; if (openId) setPaused(true); render(); } } },
+            el('span', { class: 'time' }, new Date(ev._t).toLocaleTimeString()),
+            el('span', {}, el('span', { class: 'badge ' + groupOf(ev.event) }, ev.event.replace(/_/g, ' '))),
+            el('span', { class: 'what' },
+                el('div', { class: 'title' }, d.title || ''),
+                el('div', { class: 'meta' }, [ev.repository, d.state, ev.sender && 'by ' + ev.sender].filter(Boolean).join(' · ')))));
+    if (isOpen) li.append(detail(ev, d));
+    return li;
+}
+
+function detail(ev, d) {
+    const fields = ['id', 'received_at', 'event', 'action', 'repository', 'repository_id', 'organization', 'organization_id', 'sender', 'sender_id']
+        .filter(k => ev[k]).flatMap(k => [el('dt', {}, k), el('dd', { class: 'mono' }, ev[k])]);
+    const json = JSON.stringify(ev.payload, null, 2) || '';
+    const pre = el('pre', {}, json.length > 30000 ? json.slice(0, 30000) + '\n…' : json);
+    const more = json.length > 30000 && el('button', { class: 'btn small', type: 'button', style: 'margin-top:6px',
+        on: { click: e => { pre.textContent = json; e.target.remove(); } } }, `Show all ${Math.round(json.length / 1024)} KB`);
+    const link = web(d.url);
+    return el('div', { class: 'detail' },
+        el('h4', {}, 'Streams that have this event'),
+        el('div', { class: 'follow' },
+            streamsOf(ev).map(s => el('button', { class: 'btn small', type: 'button', title: s.path, on: { click: () => open(s) } }, s.label)),
+            link && el('a', { class: 'btn small', href: link, target: '_blank', rel: 'noopener' }, 'Open on GitHub ↗')),
+        el('h4', {}, 'Fields'),
+        el('dl', { class: 'kv' }, fields),
+        el('h4', {}, 'payload'),
+        pre, more);
+}
+
+// ---- use this stream ---------------------------------------------------------
+
+function streamUrl() {
+    const q = [];
+    const last = $('opt-last').value.trim();
+    if (last !== '') q.push('last=' + Math.max(0, Math.min(1000, Math.floor(Number(last)) || 0)));
+    const types = $('opt-type').value.split(',').map(s => s.trim()).filter(t => /^[a-z_]+$/.test(t)).join(',');
+    if (types) q.push('type=' + types);
+    return SSE_BASE + scope.path + (q.length ? '?' + q.join('&') : '');
+}
+
+function snippet(url) {
+    if (lang === 'curl') return `curl -N '${url}'`;
+    if (lang === 'js') return [
+        `const stream = new EventSource('${url}');`,
+        '',
+        'stream.onmessage = (message) => {',
+        '  const event = JSON.parse(message.data);',
+        '  console.log(event.event, event.action, event.repository, event.sender);',
+        '  // event.payload is the GitHub webhook payload',
+        '};',
+    ].join('\n');
+    return [
+        'import json, requests',
+        '',
+        `url = '${url}'`,
+        'with requests.get(url, stream=True, timeout=(5, 90)) as stream:',
+        '    for line in stream.iter_lines(decode_unicode=True):',
+        "        if line.startswith('data: {'):",
+        "            event = json.loads(line[len('data: '):])",
+        "            print(event['event'], event.get('action'), event.get('repository'))",
+    ].join('\n');
+}
+
+function renderUse() {
+    const url = streamUrl();
+    $('url').value = url;
+    $('code').textContent = snippet(url);
+}
+
+function copy(text, button) {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(() => {
+        const t = button.textContent;
+        button.textContent = 'Copied';
+        setTimeout(() => { button.textContent = t; }, 1200);
+    }, () => {});
+}
+
+// ---- finder: a name becomes a stream ----------------------------------------
+
+async function github(path) {
+    const r = await fetch('https://api.github.com' + path);
+    if (r.status === 403 || r.status === 429) throw new Error('GitHub limits name lookups from your address. Wait some minutes, or select an event in the list.');
+    if (!r.ok) throw new Error(`GitHub does not know “${path.replace(/^\/(repos|users)\//, '')}”.`);
+    return r.json();
+}
+
+async function find(text) {
+    const q = text.trim();
+    if (!q) return EVERYTHING;
+    let m;
+    if ((m = q.match(/^type:([a-z_]+)$/))) return { kind: 'type', label: `type ${m[1]}`, path: `/events/type/${m[1]}` };
+    if ((m = q.match(/^@([\w-]+)$/))) {
+        const u = await github(`/users/${m[1]}`);
+        return { kind: 'user', label: '@' + u.login, path: `/events/user/${u.id}` };
+    }
+    if ((m = q.match(/^(?:https:\/\/github\.com\/)?([\w.-]+\/[\w.-]+?)(?:#|\/pull\/|\/issues\/)(\d+)$/))) {
+        const repo = await github(`/repos/${m[1]}`);
+        const item = await github(`/repos/${m[1]}/issues/${m[2]}`);
+        const kind = item.pull_request ? 'pr' : 'issue';
+        return { kind, label: `${repo.full_name}#${m[2]}`, path: `/events/${kind}/${repo.id}/${m[2]}` };
+    }
+    if ((m = q.match(/^(?:https:\/\/github\.com\/)?([\w.-]+\/[\w.-]+)$/))) {
+        const repo = await github(`/repos/${m[1]}`);
+        return { kind: 'repo', label: repo.full_name, path: `/events/repo/${repo.id}` };
+    }
+    if (/^[\w-]+$/.test(q)) {
+        const who = await github(`/users/${q}`);    // answers for organizations too
+        return who.type === 'Organization'
+            ? { kind: 'org', label: who.login, path: `/events/org/${who.id}` }
+            : { kind: 'user', label: '@' + who.login, path: `/events/user/${who.id}` };
+    }
+    throw new Error('Write owner/repo, owner/repo#number, @user, an organization name, or type:push.');
+}
+
+function fetchStats() {
+    fetch(SSE_BASE + '/stats').then(r => r.json()).then(s => {
+        $('fact-clients').textContent = s.total_clients ?? '-';
+        $('fact-stored').textContent = s.events_stored != null ? s.events_stored.toLocaleString() : '-';
+        if (s.stored_since) $('fact-stored-label').textContent = 'events stored since ' + new Date(s.stored_since).toLocaleDateString();
+    }).catch(() => {});
+}
+
+// ---- wiring ------------------------------------------------------------------
+
+$('finder').addEventListener('submit', async e => {
+    e.preventDefault();
+    const status = $('finder-status');
+    status.className = 'finder-status';
+    status.textContent = 'Looking up the name on GitHub…';
+    try {
+        open(await find($('find').value));
+        status.textContent = '';
+    } catch (err) {
+        status.className = 'finder-status bad';
+        status.textContent = err.message;
+    }
+});
+$('everything').addEventListener('click', () => { $('find').value = ''; $('finder-status').textContent = ''; open(EVERYTHING); });
+$('pause').addEventListener('click', () => { if (paused) openId = null; setPaused(!paused); });
+$('banner-btn').addEventListener('click', () => { openId = null; setPaused(false); });
+$('opt-last').addEventListener('input', renderUse);
+$('opt-type').addEventListener('input', renderUse);
+$('copy-url').addEventListener('click', e => copy($('url').value, e.target));
+$('copy-code').addEventListener('click', e => copy($('code').textContent, e.target));
+document.querySelectorAll('.tabs [role=tab]').forEach(tab => tab.addEventListener('click', () => {
+    lang = tab.dataset.lang;
+    document.querySelectorAll('.tabs [role=tab]').forEach(t => t.setAttribute('aria-selected', String(t === tab)));
+    renderUse();
+}));
+// a stream the browser gave up on comes back when the tab does
+window.addEventListener('focus', () => { if (es && es.readyState === EventSource.CLOSED) open(scope); });
+setInterval(updateRate, 5000);
+// each /stats answer costs the server a consumer; the server caches it for 30 s
+setInterval(fetchStats, 30000);
+
+let start = EVERYTHING;
+try {
+    const saved = JSON.parse(decodeURIComponent(location.hash.slice(1)));
+    // the path decides what is fetched, so it must be one of the routes
+    if (saved && /^\/events(\/(org|repo|user)\/\d+|\/(pr|issue)\/\d+\/\d+|\/type\/[a-z_]+)?$/.test(saved.path)) {
+        start = { kind: String(saved.kind), label: String(saved.label).slice(0, 120), path: saved.path };
+    }
+} catch (e) { /* no saved stream */ }
+open(start);
+</script>
 </body>
 </html>
