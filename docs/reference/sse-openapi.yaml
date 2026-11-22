@@ -20,6 +20,7 @@ paths:
       operationId: streamAllEvents
       parameters:
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
         - $ref: '#/components/parameters/LastEventID'
@@ -36,6 +37,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/OrgID'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
         - $ref: '#/components/parameters/LastEventID'
@@ -54,6 +56,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/RepoID'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
         - $ref: '#/components/parameters/LastEventID'
@@ -77,6 +80,7 @@ paths:
             type: string
             pattern: '^\d+$'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
         - $ref: '#/components/parameters/LastEventID'
@@ -96,6 +100,7 @@ paths:
         - $ref: '#/components/parameters/RepoID'
         - $ref: '#/components/parameters/Number'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
         - $ref: '#/components/parameters/LastEventID'
@@ -115,6 +120,7 @@ paths:
         - $ref: '#/components/parameters/RepoID'
         - $ref: '#/components/parameters/Number'
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
         - $ref: '#/components/parameters/LastEventID'
@@ -139,6 +145,7 @@ paths:
             pattern: '^[a-z_]+$'
             example: pull_request
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
         - $ref: '#/components/parameters/LastEventID'
@@ -208,14 +215,29 @@ components:
       name: last
       in: query
       description: |
-        Replay the last N matching events before streaming new ones. 0 means
-        none, the default is 50, the maximum 1000. Ignored when
-        Last-Event-ID is sent.
+        Replay the last N events of the route and of `type` before
+        streaming new ones. 0 means none, the default is 50, the maximum
+        1000. Ignored when Last-Event-ID or `since` is sent.
       schema:
         type: integer
         minimum: 0
         maximum: 1000
         default: 50
+    Since:
+      name: since
+      in: query
+      description: |
+        Replay from a time before streaming new ones: an RFC 3339 time, or
+        a duration back from now such as `90m`, `36h` or `2d`. Not capped;
+        a long range streams a lot of data. Ignored when Last-Event-ID is
+        sent.
+      schema:
+        type: string
+      examples:
+        duration:
+          value: "90m"
+        time:
+          value: "2026-11-22T08:00:00Z"
     Type:
       name: type
       in: query
@@ -243,7 +265,9 @@ components:
       in: header
       description: |
         The `id` of the last event received, a JetStream stream sequence.
-        Browsers send it on reconnect; the stream resumes after it.
+        Browsers send it on reconnect; the stream resumes after it. Not
+        capped: every later event of the subjects follows. An id older
+        than the stream starts at its first message.
       schema:
         type: string
         example: "1842"

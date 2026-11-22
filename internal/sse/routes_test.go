@@ -395,14 +395,94 @@ func TestMaxClients(t *testing.T) {
 	}
 }
 
-func TestLastEventIDNeverReplaysPastTheCap(t *testing.T) {
+func TestLastEventIDResumesPastTheCap(t *testing.T) {
 	old := maxLast
 	maxLast = 2
 	t.Cleanup(func() { maxLast = old })
 	f := newFixture(t)
-	got, _ := f.read("/events/org/1", "0", 2)
-	if ids := ids(got); strings.Join(ids, " ") != "d3 d6" {
-		t.Errorf("Last-Event-ID 0 with a cap of 2 replayed %v, want the last two of org 1", ids)
+	got, _ := f.read("/events/org/1?last=1", strconv.FormatUint(f.seqs["d1"], 10), 3)
+	if want := "d2 d3 d6"; strings.Join(ids(got), " ") != want {
+		t.Errorf("resume after d1 with a cap of 2 = %v, want %s", ids(got), want)
+	}
+	got, _ = f.read("/events/org/1?last=4", "", 2)
+	if want := "d3 d6"; strings.Join(ids(got), " ") != want {
+		t.Errorf("last=4 with a cap of 2 = %v, want %s", ids(got), want)
+	}
+}
+
+func TestLastEventIDOlderThanTheStreamStartsAtItsFirstMessage(t *testing.T) {
+	f := newFixture(t)
+	if err := f.js.PurgeStream("P", &nats.StreamPurgeRequest{Sequence: f.seqs["d3"]}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"0", "1"} {
+		got, _ := f.read("/events/org/1", id, 2)
+		if want := "d3 d6"; strings.Join(ids(got), " ") != want {
+			t.Errorf("Last-Event-ID %s on a stream that starts at d3 = %v, want %s", id, ids(got), want)
+		}
+	}
+}
+
+func TestSinceATime(t *testing.T) {
+	f := newFixture(t)
+	time.Sleep(50 * time.Millisecond)
+	between := time.Now().UTC().Format(time.RFC3339Nano)
+	time.Sleep(50 * time.Millisecond)
+	f.publish("d7", "1", "push")
+	f.publish("d8", "1", "issues")
+
+	// last=1 would give d8 only
+	got, _ := f.read("/events/org/1?last=1&since="+between, "", 2)
+	if want := "d7 d8"; strings.Join(ids(got), " ") != want {
+		t.Errorf("since a time before d7 = %v, want %s", ids(got), want)
+	}
+	got, _ = f.read("/events/org/1?type=issues&since="+between, "", 1)
+	if want := "d8"; strings.Join(ids(got), " ") != want {
+		t.Errorf("issues since a time before d7 = %v, want %s", ids(got), want)
+	}
+}
+
+func TestSinceADurationIsNotCapped(t *testing.T) {
+	old := maxLast
+	maxLast = 2
+	t.Cleanup(func() { maxLast = old })
+	f := newFixture(t)
+	for _, since := range []string{"1h", "2d"} {
+		got, _ := f.read("/events/org/1?last=1&since="+since, "", 4)
+		if want := "d1 d2 d3 d6"; strings.Join(ids(got), " ") != want {
+			t.Errorf("since=%s = %v, want %s", since, ids(got), want)
+		}
+	}
+}
+
+func TestLastEventIDComesBeforeSince(t *testing.T) {
+	f := newFixture(t)
+	got, _ := f.read("/events/org/1?since=1h&last=1", strconv.FormatUint(f.seqs["d2"], 10), 2)
+	if want := "d3 d6"; strings.Join(ids(got), " ") != want {
+		t.Errorf("Last-Event-ID of d2 with since=1h = %v, want %s", ids(got), want)
+	}
+}
+
+func TestABadSinceIsRefused(t *testing.T) {
+	f := newFixture(t)
+	for _, since := range []string{"yesterday", "-5m", "0s", "2026-11-22", "99999999d", "5"} {
+		if _, code := f.read("/events/org/1?since="+since, "", 0); code != http.StatusBadRequest {
+			t.Errorf("since=%s: status %d, want 400", since, code)
+		}
+	}
+}
+
+func TestParseSince(t *testing.T) {
+	now := time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)
+	for in, want := range map[string]time.Time{
+		"90m":                       now.Add(-90 * time.Minute),
+		"2d":                        now.Add(-48 * time.Hour),
+		"2026-11-20T08:30:00Z":      time.Date(2026, 11, 20, 8, 30, 0, 0, time.UTC),
+		"2026-11-20T09:30:00+01:00": time.Date(2026, 11, 20, 8, 30, 0, 0, time.UTC),
+	} {
+		if got, err := parseSince(in, now); err != nil || !got.Equal(want) {
+			t.Errorf("parseSince(%q) = %v, %v; want %v", in, got, err, want)
+		}
 	}
 }
 

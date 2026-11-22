@@ -32,7 +32,8 @@ anything else is a 404.
 
 | Parameter | Meaning |
 |---|---|
-| `last=N` | replay the last N events of the route and of `type`, then new ones; default 50, maximum 1000, `0` for none; ignored when `Last-Event-ID` is sent |
+| `last=N` | replay the last N events of the route and of `type`, then new ones; default 50, maximum 1000, `0` for none; ignored when `Last-Event-ID` or `since` is sent |
+| `since=T` | replay from a time, then new ones: an RFC 3339 time (`2026-11-22T08:00:00Z`), or a duration back from now (`90m`, `36h`, `2d`); not capped; ignored when `Last-Event-ID` is sent; a bad value is a 400 |
 | `type=a,b` | read only these GitHub event types; see [Event types](#event-types) |
 | `action=x,y` | keep only these actions; a filter after delivery, so `last=N` also counts the events that it drops |
 
@@ -40,7 +41,7 @@ anything else is a 404.
 
 | Header | Meaning |
 |---|---|
-| `Last-Event-ID: <sequence>` | resume after this stream sequence; browsers send it on reconnect. An id older than the last 1000 matching events resumes at those 1000 |
+| `Last-Event-ID: <sequence>` | resume after this stream sequence; browsers send it on reconnect. Not capped: every later event of the connection's subjects follows. An id older than the stream starts at its first message |
 
 ## Stream contents
 
@@ -59,6 +60,32 @@ JetStream.
 - `last=N` counts only messages that match the subjects of the
   connection, found by a binary search over the stream; the stream also
   holds other subjects between them.
+
+## Where the replay starts
+
+The first of these that the request has decides:
+
+| Request has | The stream starts |
+|---|---|
+| `Last-Event-ID` | after that sequence |
+| `since` | at the first event stored at or after that time |
+| `last=N`, or nothing (`last=50`) | at the last N events |
+
+- `last=N` needs a search, so it has a maximum. `Last-Event-ID` and
+  `since` give NATS the start directly and have no maximum: a consumer
+  that was away gets every event that it missed.
+- A long range is a lot of data. An event is 13 to 30 kB, and a busy
+  repository stores 1000 events in 9 minutes. Select the types that
+  you use with `type`.
+- The stream keeps events for `NATS_STREAM_MAX_AGE`, and the fan-out
+  copies for `NATS_STREAM_COPY_MAX_AGE` when set. A start before that
+  begins at the oldest event.
+- `since` compares with the time at which the stream stored the
+  message, which is not always `received_at`: a restore from the
+  archive stores old events again.
+- Write a time with `Z`, or encode the `+` of an offset as `%2B`.
+- A reconnect of `EventSource` sends the same URL and `Last-Event-ID`,
+  so `since` and `last` apply to the first connection only.
 
 ## Event types
 

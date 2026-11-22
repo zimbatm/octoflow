@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,8 +19,9 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// maxLast bounds the replay a client can ask for, with ?last= or with an
-// old Last-Event-ID. A variable so tests can lower it.
+// maxLast bounds the replay a client can ask for with ?last=: the search for
+// its start costs more the further back it goes. A variable so tests can
+// lower it.
 var maxLast = 1000
 
 const heartbeatEvery = 30 * time.Second
@@ -60,10 +62,19 @@ func (h *Handler) Shutdown() {
 // Clients is the number of open streams.
 func (h *Handler) Clients() int64 { return h.clients.Load() }
 
-// Stream replays the last ?last= events matching subjects, or resumes after
-// Last-Event-ID, then writes new ones until the client leaves. streamID
-// names the route for logs and metrics, for example org-222.
+// Stream replays the events matching subjects, then writes new ones until
+// the client leaves. The replay starts after Last-Event-ID, else at
+// ?since=, else at the last ?last= events. streamID names the route for
+// logs and metrics, for example org-222.
 func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string, subjects []string, filter *events.EventFilter) {
+	var since time.Time
+	if s := r.URL.Query().Get("since"); s != "" {
+		var err error
+		if since, err = parseSince(s, time.Now()); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
 	sw, err := NewWriter(w)
 	if err != nil {
 		http.Error(w, "SSE not supported", http.StatusInternalServerError)
@@ -102,7 +113,7 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string
 		case <-ctx.Done():
 		}
 	}()
-	sub, err := h.subscribe(ctx, subjects, r.Header.Get("Last-Event-ID"), lastCount)
+	sub, err := h.subscribe(ctx, subjects, r.Header.Get("Last-Event-ID"), since, lastCount)
 	if err != nil {
 		// the client left, or the server shuts down, while the replay start was
 		// looked up: nothing failed, and nobody is there to read an error
@@ -173,7 +184,7 @@ func (h *Handler) consumerName() string {
 
 // subscribe creates a consumer that the server deletes once idle.
 // Last-Event-ID is the stream sequence of the last event the client saw.
-func (h *Handler) subscribe(ctx context.Context, subjects []string, lastEventID string, lastCount int) (*nats.Subscription, error) {
+func (h *Handler) subscribe(ctx context.Context, subjects []string, lastEventID string, since time.Time, lastCount int) (*nats.Subscription, error) {
 	name := h.consumerName()
 	cc := &nats.ConsumerConfig{
 		Durable:        name,
@@ -184,15 +195,14 @@ func (h *Handler) subscribe(ctx context.Context, subjects []string, lastEventID 
 		InactiveThreshold: time.Minute,
 	}
 
-	if seq, err := strconv.ParseUint(lastEventID, 10, 64); err == nil {
-		// a reconnect resumes where it left off, but never further back
-		// than the replay cap: an old id would stream the whole stream.
-		floor, err := h.startSeqForLast(ctx, subjects, maxLast)
-		if err != nil {
-			return nil, err
-		}
+	// a start sequence or time costs no search, so neither has a cap. The
+	// server moves a start before the first message to the first message.
+	if seq, err := strconv.ParseUint(lastEventID, 10, 64); err == nil && seq < math.MaxUint64 {
 		cc.DeliverPolicy = nats.DeliverByStartSequencePolicy
-		cc.OptStartSeq = max(seq+1, floor)
+		cc.OptStartSeq = seq + 1
+	} else if !since.IsZero() {
+		cc.DeliverPolicy = nats.DeliverByStartTimePolicy
+		cc.OptStartTime = &since
 	} else if lastCount > 0 {
 		start, err := h.startSeqForLast(ctx, subjects, lastCount)
 		if err != nil {
@@ -217,6 +227,25 @@ func (h *Handler) subscribe(ctx context.Context, subjects []string, lastEventID 
 		h.deleteConsumer(name)
 	}()
 	return sub, nil
+}
+
+// parseSince reads an RFC 3339 time, or a duration back from now: a Go
+// duration such as 90m, or whole days as in 2d.
+func parseSince(s string, now time.Time) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	d, err := time.ParseDuration(s)
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		var n int64
+		// 16 bits of days do not overflow a Duration
+		n, err = strconv.ParseInt(days, 10, 16)
+		d = time.Duration(n) * 24 * time.Hour
+	}
+	if err != nil || d <= 0 {
+		return time.Time{}, fmt.Errorf("since: %q is not an RFC 3339 time, nor a duration such as 90m or 2d", s)
+	}
+	return now.Add(-d), nil
 }
 
 // deleteConsumer is best effort: InactiveThreshold removes what it misses.

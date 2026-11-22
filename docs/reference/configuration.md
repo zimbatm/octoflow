@@ -84,7 +84,8 @@ compression, row groups of 10000.
 
 | `SSE_MAX_CLIENTS` | `1000` | Open streams per process; each holds a JetStream consumer. Beyond it a request gets a 503. `0` is unlimited. |
 
-Fixed: `?last=` defaults to 50 and is capped at 1000; heartbeat every
+Fixed: `?last=` defaults to 50 and is capped at 1000, `?since=` and
+`Last-Event-ID` are not capped; heartbeat every
 30 s; a consumer per connection, removed one minute after the client
 leaves. On shutdown the server closes every stream at once; browsers
 reconnect with `Last-Event-ID`.
