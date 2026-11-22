@@ -393,3 +393,23 @@ func TestStatsCountsStoredEventsWithoutCopies(t *testing.T) {
 		t.Errorf("Stored() right after = %d, %v; want the cached 6", n, err)
 	}
 }
+
+func TestSiteRoute(t *testing.T) {
+	f := newFixture(t)
+	f.h.Site = config.SiteConfig{Title: "NixOS events", Streams: []config.SiteStream{{Label: "NixOS/nixpkgs", Path: "/events/repo/4542716"}}}
+	resp, err := http.Get(f.server.URL + "/site")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var site config.SiteConfig
+	if err := json.NewDecoder(resp.Body).Decode(&site); err != nil {
+		t.Fatal(err)
+	}
+	if site.Title != "NixOS events" || len(site.Streams) != 1 || site.Streams[0].Path != "/events/repo/4542716" {
+		t.Errorf("site = %+v", site)
+	}
+	if resp.Header.Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("no CORS header: the page may be on another origin")
+	}
+}

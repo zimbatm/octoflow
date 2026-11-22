@@ -85,6 +85,16 @@ Fixed: `?last=` defaults to 50 and is capped at 1000; heartbeat every
 leaves. On shutdown the server closes every stream at once; browsers
 reconnect with `Last-Event-ID`.
 
+## Landing page
+
+Read by the SSE server and handed to the page at `/site`.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `SITE_TITLE` | `Octoflow` | Name of the deployment, in the header and the page title. |
+| `SITE_INTRO` | none | Introduction, in place of the general one. Say whose events this server has. |
+| `SITE_STREAMS` | none | Streams the page offers first: comma-separated `label=route`, for example `NixOS/nixpkgs=/events/repo/4542716,NixOS=/events/org/487568`. A route that is not one of the SSE API stops the process. |
+
 ## Dashboard
 
 | Variable | Default | Meaning |

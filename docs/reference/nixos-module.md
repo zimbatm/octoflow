@@ -16,6 +16,9 @@
 | `metricsListen` | attrs of string | `webhook = "127.0.0.1:9180"`, `dispatcher = ...9181`, `sse = ...9182`, `s3 = ...9183`, `public-ingest = ...9184`, `nats = ...9185` | `METRICS_LISTEN_ADDR` per service; `""` disables one. `nats` runs `prometheus-nats-exporter` against the local server, whose monitoring port is then 127.0.0.1:8222 |
 | `webhook.listen` | string | `127.0.0.1:8180` | `WEBHOOK_LISTEN_ADDR` |
 | `webhook.environmentFile` | path or null | `null` | systemd `EnvironmentFile` with `WEBHOOK_SECRET=`; without a secret the unit fails unless the file sets `WEBHOOK_ALLOW_UNSIGNED=true` |
+| `site.title` | string | `Octoflow` | `SITE_TITLE`, the name on the landing page |
+| `site.intro` | string or null | `null` | `SITE_INTRO`, the introduction on the landing page |
+| `site.streams` | attrs of string | `{ }` | `SITE_STREAMS`: label to SSE route, the streams the landing page offers first |
 | `sse.listen` | string | `127.0.0.1:8181` | `SSE_LISTEN_ADDR` |
 | `s3.bucket` | string or null | `null` | `S3_BUCKET`; the s3 unit exists only when set |
 | `s3.endpoint` | string or null | `null` | `S3_ENDPOINT` |

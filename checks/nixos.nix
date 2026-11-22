@@ -33,6 +33,7 @@ pkgs.testers.runNixOSTest {
           NATS_STREAM_MAX_AGE = "30d";
           NATS_STREAM_COPY_MAX_AGE = "7d";
         };
+        site.streams."numtide/x" = "/events/repo/111";
         webhook.environmentFile = pkgs.writeText "webhook.env" "WEBHOOK_SECRET=s3cret";
         s3 = {
           bucket = "octoflow";
@@ -92,6 +93,9 @@ pkgs.testers.runNixOSTest {
           timeout=30,
         ).strip()
         assert out == "1", f"{route}: {out} events"
+
+    with subtest("the landing page gets the site settings"):
+      machine.succeed("curl -sf http://127.0.0.1:8181/site | jq -e '.title == \"Octoflow\" and .streams[0].label == \"numtide/x\" and .streams[0].path == \"/events/repo/111\"'")
 
     with subtest("every service exposes metrics; the dispatcher counted the event"):
       machine.wait_until_succeeds(

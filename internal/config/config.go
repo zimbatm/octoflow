@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -18,6 +19,7 @@ type Config struct {
 	Dispatch     DispatchConfig
 	S3           S3Config
 	SSE          SSEConfig
+	Site         SiteConfig
 	Dashboard    DashboardConfig
 	PublicIngest PublicIngestConfig
 	Log          LogConfig
@@ -175,6 +177,10 @@ func LoadFromEnv() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	siteStreams, err := envParse("SITE_STREAMS", []SiteStream{}, parseSiteStreams)
+	if err != nil {
+		return nil, err
+	}
 	maxClients, err := envParse("SSE_MAX_CLIENTS", 1000, strconv.Atoi)
 	if err != nil {
 		return nil, err
@@ -228,6 +234,11 @@ func LoadFromEnv() (*Config, error) {
 		SSE: SSEConfig{
 			ListenAddr: getEnvOrDefault("SSE_LISTEN_ADDR", httpAddr),
 			MaxClients: maxClients,
+		},
+		Site: SiteConfig{
+			Title:   getEnvOrDefault("SITE_TITLE", "Octoflow"),
+			Intro:   os.Getenv("SITE_INTRO"),
+			Streams: siteStreams,
 		},
 		Dashboard: DashboardConfig{
 			ListenAddr: getEnvOrDefault("DASHBOARD_LISTEN_ADDR", httpAddr),
@@ -302,6 +313,39 @@ func (c *S3Config) Validate() error {
 		return errors.New("S3_BUCKET environment variable is required")
 	}
 	return nil
+}
+
+// SiteConfig is what the landing page says about this deployment. The SSE
+// server hands it to the page at /site.
+type SiteConfig struct {
+	Title string `json:"title"`
+	// replaces the page's own introduction when set
+	Intro string `json:"intro,omitempty"`
+	// streams the page offers first, for example the repositories that
+	// send their events here
+	Streams []SiteStream `json:"streams"`
+}
+
+type SiteStream struct {
+	Label string `json:"label"`
+	// an SSE route, such as /events/repo/4542716
+	Path string `json:"path"`
+}
+
+var streamPath = regexp.MustCompile(`^/events(/(org|repo|user)/[0-9]+|/(pr|issue)/[0-9]+/[0-9]+|/type/[a-z_]+)?$`)
+
+// parseSiteStreams reads "label=/events/repo/1,other=/events/org/2".
+func parseSiteStreams(s string) ([]SiteStream, error) {
+	out := []SiteStream{}
+	for _, item := range splitList(s) {
+		label, path, ok := strings.Cut(item, "=")
+		label, path = strings.TrimSpace(label), strings.TrimSpace(path)
+		if !ok || label == "" || !streamPath.MatchString(path) {
+			return nil, fmt.Errorf("want label=/events/... with a route of the SSE API, got %q", item)
+		}
+		out = append(out, SiteStream{Label: label, Path: path})
+	}
+	return out, nil
 }
 
 // parseAge reads a retention: a Go duration such as 36h, or whole days as

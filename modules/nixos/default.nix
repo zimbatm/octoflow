@@ -143,6 +143,28 @@ in
       };
     };
 
+    site = {
+      title = lib.mkOption {
+        type = lib.types.str;
+        default = "Octoflow";
+        description = "Name of this deployment on the landing page.";
+      };
+      intro = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "Live GitHub events of the NixOS organization.";
+        description = "Introduction on the landing page, in place of the general one.";
+      };
+      streams = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        example = {
+          "NixOS/nixpkgs" = "/events/repo/4542716";
+        };
+        description = "Streams the landing page offers first, as label to SSE route: the repositories or organizations that send their events here.";
+      };
+    };
+
     sse.listen = lib.mkOption {
       type = lib.types.str;
       default = "127.0.0.1:8181";
@@ -235,7 +257,12 @@ in
       octoflow-sse = mkService {
         description = "octoflow SSE server";
         service = "sse";
-        environment.SSE_LISTEN_ADDR = cfg.sse.listen;
+        environment = {
+          SSE_LISTEN_ADDR = cfg.sse.listen;
+          SITE_TITLE = cfg.site.title;
+          SITE_STREAMS = lib.concatStringsSep "," (lib.mapAttrsToList (label: path: "${label}=${path}") cfg.site.streams);
+        }
+        // lib.optionalAttrs (cfg.site.intro != null) { SITE_INTRO = cfg.site.intro; };
       };
     }
     // lib.optionalAttrs (cfg.s3.bucket != null) {
