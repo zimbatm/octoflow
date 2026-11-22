@@ -147,3 +147,26 @@ subjects. The dispatcher writes it; the SSE server reads it for the
 nats kv get octoflow_names repo.nixos.nixpkgs --raw   # 4542716
 nats kv ls octoflow_names
 ```
+
+## Status counts
+
+The KV bucket `octoflow_status` holds the counts behind
+[`GET /status`](sse-api.md#status). The first writer creates it.
+
+| Setting | Value |
+|---|---|
+| Storage | file |
+| Replicas | `NATS_STREAM_REPLICAS` |
+| Entry TTL | 48 hours |
+| History | 1 |
+
+| Key | Writer | Value |
+|---|---|---|
+| `events.<YYYY-MM-DD>T<HH>` | dispatcher | JSON array of 60 counts, one per minute of that UTC hour: primary events by store time |
+| `refused.<YYYY-MM-DD>T<HH>` | webhook receiver | the same shape: refused deliveries by request time |
+
+A writer collects its counts in memory and writes each hour it touched
+at most every 5 seconds, so the write rate does not follow the event
+rate. Each write is a compare-and-set on the key revision: two writers
+of one key, for example two dispatchers, add up. The SSE server only
+reads, 50 keys per answer, and never creates the bucket.

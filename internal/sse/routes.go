@@ -14,7 +14,7 @@ import (
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
-// Routes registers the SSE endpoints and /stats on mux. Only numeric ids
+// Routes registers the SSE endpoints, /stats, /status and /site on mux. Only numeric ids
 // reach a subject, which may not take wildcards from a client; a name in a
 // path is first resolved to its id (names.go).
 func Routes(mux *http.ServeMux, h *Handler, prefix string) {
@@ -37,6 +37,18 @@ func Routes(mux *http.ServeMux, h *Handler, prefix string) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(stats)
+	})
+
+	get("/status", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, err := h.Status()
+		if err != nil {
+			slog.Warn("Failed to read the status counts", "error", err)
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"status not available"}`))
+			return
+		}
+		_, _ = w.Write(body)
 	})
 
 	get("/site", func(w http.ResponseWriter, r *http.Request) {

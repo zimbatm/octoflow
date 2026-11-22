@@ -20,6 +20,25 @@ Open the delivery in GitHub's "Recent Deliveries" and read the response.
 
 `octoflow_webhook_requests_total` counts every delivery by status.
 
+## The Status section of the page looks wrong
+
+The landing page reads [`GET /status`](../reference/sse-api.md#status).
+`curl -s http://localhost:8080/status | jq 'del(.events, .refused)'`
+prints the totals without the two series.
+
+| Symptom | Cause | Check |
+|---|---|---|
+| "No status from this server" | the SSE server is older than `/status`, or answers 503 | `curl -i .../status`; the SSE log names the NATS error |
+| the chart is flat at zero, the last event is recent | the dispatcher is down or behind; it writes the counts | `systemctl status octoflow-dispatcher`, `octoflow_consumer_pending{consumer="event-dispatcher"}` |
+| the last event is old | nothing reaches the stream | "Recent Deliveries" in GitHub, then `systemctl status octoflow-webhook` |
+| refused deliveries above zero | the receiver answered 503, 413 or 400 to a delivery | `octoflow_webhook_requests_total` by `status`, and the table above |
+| GitHub shows failed deliveries, the page shows none refused | the request did not reach the receiver (502 from nginx, DNS), or the status is one that is not counted | the nginx log; 401 and 403 are never counted |
+
+The counts are in the KV bucket `octoflow_status`:
+`nats kv ls octoflow_status`, then `nats kv get octoflow_status events.2026-11-22T10`.
+To start the chart again from zero, `nats kv del octoflow_status -f`
+deletes the bucket; the writers create it again with their next count.
+
 ## The receiver does not start
 
 `WEBHOOK_SECRET is not set` in the log: set it, or set

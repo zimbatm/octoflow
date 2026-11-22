@@ -57,8 +57,48 @@ The link from a CI event to its pull request is best-effort; see
 | Route | Answers |
 |---|---|
 | `/stats` | JSON: `total_clients`, the open connections of this process; `events_stored`, the events in the stream without the fan-out copies, refreshed every 30 seconds; `stored_since`, the store time of the oldest message. The last two are absent when the stream does not answer |
+| `/status` | JSON: events and refused deliveries per minute for the last 24 hours, and the time of the last event; see [Status](#status) |
 | `/site` | JSON: `title`, `intro` and `streams` (`label`, `path`) of this deployment, from `SITE_TITLE`, `SITE_INTRO` and `SITE_STREAMS`; the landing page reads it |
 | `/health` | `{"status":"healthy"}`; shared by every service on the address |
+
+## Status
+
+`GET /status` says how much data flows, for a reader without access to
+the metrics. The landing page draws it.
+
+| Field | Meaning |
+|---|---|
+| `now` | when the answer was computed, UTC; the answer is reused for 10 seconds |
+| `start` | start of the first minute of the series, UTC |
+| `step` | seconds per entry, always 60 |
+| `events` | 1440 counts, one per minute: the primary events that entered the stream, without the fan-out copies. The last entry is the current minute and still grows |
+| `refused` | 1440 counts: the deliveries that the webhook receiver refused and whose event is lost with it |
+| `last_event` | store time of the newest message in the stream; absent when the stream never had one or does not answer |
+| `events_1h`, `events_24h` | sums of the last 60 entries and of all entries of `events` |
+| `refused_1h`, `refused_24h` | the same for `refused` |
+
+What the numbers do and do not say:
+
+- A refused delivery is a request that the receiver answered with
+  `publish_error` (503), `too_large` (413), `invalid_payload` (400) or
+  `read_error` (400). A bad signature, missing headers, a wrong content
+  type and an organization that is not allowed are not counted: they
+  are not deliveries of an event, or are refused on purpose.
+- A delivery that never reached the receiver is not counted. When the
+  receiver is down, the web server in front answers 502 and Octoflow
+  does not see the request. GitHub's "Recent Deliveries" shows those.
+- The dispatcher counts the events, under the minute the stream stored
+  them. While the dispatcher is down or behind, the newest minutes are
+  too low; they fill in when it catches up. `last_event` comes from the
+  stream itself and does not wait for the dispatcher.
+- An event that public-ingest or `octoflow restore` publishes counts
+  under the minute it was stored, not the time it happened on GitHub.
+- A process that is killed loses the counts of its last 5 seconds. A
+  normal stop writes them.
+
+The answer is 503 with `{"error": ...}` when the counts cannot be read.
+The counts live in the KV bucket `octoflow_status`; see
+[Subjects and the stream](subjects.md#status-counts).
 
 ## Query parameters
 

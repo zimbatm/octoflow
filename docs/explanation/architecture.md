@@ -115,6 +115,27 @@ consumers and reads `NumPending`. It costs about twenty JetStream calls
 per connection and is exact. A cheaper approximation can replace it if
 many dashboards reconnect at once.
 
+## The public status
+
+`/status` shows a visitor the events per minute of the last 24 hours.
+The Prometheus counters cannot serve it: they are per process, start
+at zero on a restart, and the SSE server that answers is not the
+process that receives. The stream cannot serve it cheaply either: a
+count per minute is a consumer per minute.
+
+So the counts go to a KV bucket, one key per hour with 60 counts. The
+dispatcher counts the events: it sees each primary event one time,
+whether the webhook receiver, public-ingest or a restore published it,
+and its durable consumer continues after a restart. It counts under
+the store time of the message, so a backlog lands in the right
+minutes. The webhook receiver counts the deliveries it refuses, because
+only it sees them. Both write at most every 5 seconds per key.
+
+The cost: the chart follows the dispatcher. When the dispatcher is
+down, the newest minutes stay at zero until it is back. The time of
+the last event comes from the stream and shows that events still
+arrive.
+
 ## One binary
 
 The services share configuration, a NATS connection, stream setup,

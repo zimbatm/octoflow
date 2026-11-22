@@ -17,6 +17,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/zimbatm/octoflow/internal/metrics"
 	"github.com/zimbatm/octoflow/internal/names"
+	"github.com/zimbatm/octoflow/internal/status"
 	"github.com/zimbatm/octoflow/pkg/events"
 )
 
@@ -49,10 +50,14 @@ type Handler struct {
 	// the last answer of Stored
 	storedMu sync.Mutex
 	stored   stored
+	counts   *status.Reader
+	// the last answer of Status
+	statusMu   sync.Mutex
+	lastStatus statusAnswer
 }
 
 func NewHandler(js nats.JetStreamContext, stream string, maxClients int) *Handler {
-	return &Handler{js: js, stream: stream, MaxClients: maxClients, done: make(chan struct{})}
+	return &Handler{js: js, stream: stream, MaxClients: maxClients, done: make(chan struct{}), counts: status.NewReader(js)}
 }
 
 // Shutdown ends every open stream. http.Server.Shutdown waits for open
