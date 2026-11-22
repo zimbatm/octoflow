@@ -71,6 +71,11 @@ and returns; SSE streams are closed at once, and other HTTP requests get
 30 seconds to finish. The
 NATS connection closes last.
 
+GitHub does not retry a delivery that was refused. With the NixOS module
+systemd holds the port of the receiver (`octoflow-webhook.socket`), so a
+delivery that arrives while the service restarts waits in the socket and
+is answered by the new process. GitHub waits 10 seconds for an answer.
+
 ## After a loss
 
 The archive is the backup of the stream. `octoflow restore` reads the

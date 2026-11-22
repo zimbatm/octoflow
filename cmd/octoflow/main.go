@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -128,9 +129,19 @@ func main() {
 	if err != nil {
 		fatal("Failed to start", err)
 	}
+	inherited, err := inheritedListeners()
+	if err != nil {
+		fatal("Failed to start", err)
+	}
 	for _, srv := range servers {
-		slog.Info("HTTP listening", "address", srv.Addr)
-		start("http "+srv.Addr, func() error { return serveHTTP(ctx, srv) })
+		l := inherited[srv.Addr]
+		delete(inherited, srv.Addr)
+		slog.Info("HTTP listening", "address", srv.Addr, "socket_activated", l != nil)
+		start("http "+srv.Addr, func() error { return serveHTTP(ctx, srv, l) })
+	}
+	// a socket nobody serves would accept deliveries and never answer them
+	for addr := range inherited {
+		fatal("Failed to start", fmt.Errorf("systemd passed a socket on %s, and no service listens there; the *_LISTEN_ADDR must be the same address", addr))
 	}
 	for _, s := range selected {
 		if s.run == nil {
@@ -228,7 +239,7 @@ func serveMetrics(ctx context.Context, addr string) error {
 		_, _ = io.WriteString(w, "ok\n")
 	})
 	slog.Info("Metrics listening", "address", addr)
-	return serveHTTP(ctx, &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second})
+	return serveHTTP(ctx, &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}, nil)
 }
 
 // watchStream refreshes the stream and consumer gauges every 30 seconds.
@@ -272,10 +283,16 @@ func streamGauges(js nats.JetStreamContext, stream string) error {
 }
 
 // serveHTTP runs srv until ctx ends, then gives in-flight requests 30 seconds.
-func serveHTTP(ctx context.Context, srv *http.Server) error {
+// It serves on inherited when systemd passed the socket, else it binds srv.Addr.
+func serveHTTP(ctx context.Context, srv *http.Server, inherited net.Listener) error {
 	errCh := make(chan error, 1)
 	go func() {
-		err := srv.ListenAndServe()
+		var err error
+		if inherited != nil {
+			err = srv.Serve(inherited)
+		} else {
+			err = srv.ListenAndServe()
+		}
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
