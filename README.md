@@ -53,6 +53,7 @@ The [documentation index](docs/README.md) follows Diátaxis:
   [ingest public repositories](docs/how-to/ingest-public-repositories.md),
   [query the Parquet archive](docs/how-to/query-the-parquet-archive.md),
   [restore from the archive](docs/how-to/restore-from-the-archive.md),
+  [publish a public dataset](docs/how-to/publish-a-public-dataset.md),
   [inspect the stream](docs/how-to/inspect-the-stream.md),
   [troubleshoot](docs/how-to/troubleshoot.md)
 - **Reference**: [configuration](docs/reference/configuration.md),
@@ -81,6 +82,8 @@ one process:
 | `dashboard` | serves the demo page in `web/` |
 | `public-ingest` | reads the Events API and GH Archive for repositories without a webhook |
 | `restore --from DATE` | publishes archived events from S3 back into the stream |
+| `wipe --id ...` | deletes selected events from the stream, the batch files and the daily files |
+| `compact` | writes one Parquet file per day from the batch files, for a public dataset |
 
 ## Development
 

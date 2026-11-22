@@ -27,6 +27,9 @@
 | `s3.region` | string | `auto` | `AWS_REGION`; Hetzner Object Storage expects its location such as `fsn1`, R2 `auto` |
 | `s3.keyPrefix` | string | `github-events` | `S3_KEY_PREFIX` |
 | `s3.environmentFile` | path or null | `null` | `AWS_ACCESS_KEY_ID=` and `AWS_SECRET_ACCESS_KEY=` |
+| `s3.daily.enable` | bool | `false` | run `octoflow compact` on a timer: one Parquet file per day, the file to [publish as a dataset](../how-to/publish-a-public-dataset.md); needs `s3.bucket`; makes nothing public |
+| `s3.daily.prefix` | string or null | `null` | `S3_DAILY_PREFIX`; `null` is `keyPrefix` with `-daily` appended. Run `octoflow wipe` with the same value |
+| `s3.daily.onCalendar` | string | `*-*-* 03:00:00 UTC` | when the timer runs, a systemd calendar expression |
 | `publicIngest.repos` | list of string | `[]` | `PUBLIC_REPOS`; the public-ingest unit exists only when non-empty |
 | `publicIngest.environmentFile` | path or null | `null` | `GITHUB_TOKEN=` |
 
@@ -39,6 +42,8 @@
 | `octoflow-dispatcher` | `octoflow dispatcher` | always |
 | `octoflow-sse` | `octoflow sse` | always |
 | `octoflow-s3` | `octoflow s3` | `s3.bucket` is set |
+| `octoflow-compact` | `octoflow compact`, a oneshot: the daily file of yesterday | `s3.bucket` is set and `s3.daily.enable` |
+| `octoflow-compact.timer` | starts `octoflow-compact` at `s3.daily.onCalendar`; `Persistent`, so a host that was down at that time runs it when it is back | same |
 | `octoflow-public-ingest` | `octoflow public-ingest` | `publicIngest.repos` is non-empty |
 
 Every unit: `DynamicUser`, `Restart=always` after 5 s, `ProtectSystem=strict`,
@@ -46,6 +51,12 @@ Every unit: `DynamicUser`, `Restart=always` after 5 s, `ProtectSystem=strict`,
 protection, `AF_INET`, `AF_INET6` and `AF_UNIX` only. All set
 `NATS_STREAM_REPLICAS=1` and wait for `network-online.target` and, when
 `nats.enable`, `nats.service`.
+
+`octoflow-compact` has the same hardening and the environment of
+`octoflow-s3`. It differs in three points: it does not restart, so a
+failed run waits for the next timer; it does not wait for
+`nats.service`; and it has no metrics address. Its result is one line in
+the journal: `journalctl -u octoflow-compact`.
 
 With `domain` set, nginx terminates TLS, proxies `/webhook` and the SSE
 routes, accepts bodies up to 25 MB on `/webhook`, and limits each client address to
@@ -62,4 +73,7 @@ same file, opened with `?sse=https://<domain>`.
 and a webhook secret, then checks: a forged delivery gets 401 and a
 signed one 200; the event arrives once on the org, repo and pr SSE
 routes; every unit serves metrics and the dispatcher counted the event;
-stopping the s3 unit uploads the batch. `nix flake check` runs it.
+stopping the s3 unit uploads the batch; a restore brings a lost stream
+back; the compaction unit runs, `octoflow compact` writes a daily file
+that DuckDB reads and restore does not; a wipe removes the event from
+the stream, the batch file and the daily file. `nix flake check` runs it.

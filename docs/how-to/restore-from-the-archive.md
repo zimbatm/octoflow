@@ -72,3 +72,6 @@ do not want the archive to grow.
 Every field of the event, including `metadata` for public-ingest events.
 Fan-out copies are not archived; the dispatcher
 recreates them from the restored primary events.
+
+The command reads the batch files only. The daily files of
+`octoflow compact` are under another prefix and are never restored.

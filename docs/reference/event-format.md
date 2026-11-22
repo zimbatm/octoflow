@@ -74,6 +74,25 @@ row groups of 10000 and named
 `{S3_KEY_PREFIX}/{YYYY}/{MM}/{DD}/{unix nanoseconds}.parquet`, by the
 upload time in UTC.
 
+### Daily file
+
+`octoflow compact` writes the events of one UTC day into one file with
+the same columns:
+
+| | Batch file | Daily file |
+|---|---|---|
+| Key | `{S3_KEY_PREFIX}/{YYYY}/{MM}/{DD}/{unix nanoseconds}.parquet` | `{S3_DAILY_PREFIX}/{YYYY-MM-DD}.parquet` |
+| Day in the key | upload time | `received_at` of the rows |
+| Rows | one batch, in arrival order; at most `S3_BATCH_SIZE` | every event received on the day, sorted by `received_at`, then `id` |
+| Same `id` twice | possible | never in one file; the earliest row stays |
+| Row groups | one in most files | about 64 MiB of payload each |
+| Written by | the s3 service, once; `wipe` can rewrite it | `compact`, again on every run; `wipe` can rewrite it |
+| Read by | `restore`, `wipe`, `compact` | `wipe`, and readers of a [public dataset](../how-to/publish-a-public-dataset.md) |
+
+Both have zstd compression, pages of 1 MiB, and no statistics on
+`payload` and `metadata`. `S3_DAILY_PREFIX` is `{S3_KEY_PREFIX}-daily`
+by default.
+
 ## SSE framing
 
 ```

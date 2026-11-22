@@ -19,6 +19,7 @@ pages, each with one job.
 - [Query the Parquet archive](how-to/query-the-parquet-archive.md)
 - [Restore events from the archive](how-to/restore-from-the-archive.md)
 - [Wipe events](how-to/wipe-events.md)
+- [Publish a public dataset](how-to/publish-a-public-dataset.md): one Parquet file per day over HTTPS
 - [Inspect the stream with the NATS CLI](how-to/inspect-the-stream.md)
 - [Troubleshoot](how-to/troubleshoot.md)
 
@@ -27,7 +28,7 @@ pages, each with one job.
 - [Configuration](reference/configuration.md): every environment variable
 - [Command line, make targets and scripts](reference/cli.md)
 - [Subjects and the stream](reference/subjects.md)
-- [Event format](reference/event-format.md): the JSON message and the Parquet row
+- [Event format](reference/event-format.md): the JSON message, the Parquet row, the batch and the daily file
 - [SSE API](reference/sse-api.md) and its [OpenAPI description](reference/sse-openapi.yaml)
 - [Metrics](reference/metrics.md)
 - [NixOS module](reference/nixos-module.md)
