@@ -241,13 +241,33 @@ in
       ];
     };
 
+    # systemd holds the port of the receiver, so a delivery that arrives
+    # while the service restarts waits for it. GitHub does not retry a
+    # refused delivery, and a restart of nats restarts the receiver too.
+    systemd.sockets.octoflow-webhook = {
+      description = "octoflow webhook receiver socket";
+      wantedBy = [ "sockets.target" ];
+      listenStreams = [ cfg.webhook.listen ];
+      socketConfig.Backlog = 4096;
+    };
+
     systemd.services = {
-      octoflow-webhook = mkService {
-        description = "octoflow webhook receiver";
-        service = "webhook";
-        environment.WEBHOOK_LISTEN_ADDR = cfg.webhook.listen;
-        inherit (cfg.webhook) environmentFile;
-      };
+      octoflow-webhook =
+        let
+          unit = mkService {
+            description = "octoflow webhook receiver";
+            service = "webhook";
+            environment.WEBHOOK_LISTEN_ADDR = cfg.webhook.listen;
+            inherit (cfg.webhook) environmentFile;
+          };
+        in
+        unit
+        // {
+          # without the socket the process would bind the port itself, and
+          # the socket unit could not take it any more
+          requires = unit.requires ++ [ "octoflow-webhook.socket" ];
+          after = unit.after ++ [ "octoflow-webhook.socket" ];
+        };
 
       octoflow-dispatcher = mkService {
         description = "octoflow event dispatcher";

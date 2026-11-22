@@ -121,6 +121,13 @@ pkgs.testers.runNixOSTest {
         "| jq -e '.config.max_age == 30 * 86400e9 and .config.allow_msg_ttl'"
       )
 
+    with subtest("a delivery that arrives while the receiver is down waits for it"):
+      machine.succeed("systemctl is-active octoflow-webhook.socket")
+      machine.succeed("systemctl stop octoflow-webhook.service")
+      assert deliver(f"sha256={sig}") == "200"
+      machine.succeed("systemctl is-active octoflow-webhook.service")
+      machine.succeed("journalctl -u octoflow-webhook | grep 'socket_activated=true'")
+
     with subtest("the SSE server stops at once with a client connected"):
       machine.succeed("curl -sN http://127.0.0.1:8181/events >/dev/null 2>&1 &")
       machine.wait_until_succeeds("curl -sf http://127.0.0.1:8181/stats | grep -c '\"total_clients\":1'")

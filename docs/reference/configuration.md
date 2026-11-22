@@ -11,6 +11,10 @@ value stops the process with an error naming the variable.
 | `HTTP_LISTEN_ADDR` | `:8080` | One server for the webhook, the SSE routes and the dashboard, with `GET /health`. |
 | `WEBHOOK_LISTEN_ADDR`, `SSE_LISTEN_ADDR`, `DASHBOARD_LISTEN_ADDR` | `HTTP_LISTEN_ADDR` | Give a service its own server, for example to expose only `/webhook`. The NixOS module runs one process per service and sets these. |
 
+Under systemd socket activation (`LISTEN_FDS`) a server takes the passed
+socket whose address is its listen address, and does not bind the port
+itself. A passed socket that no server listens on stops the process.
+
 The servers have no read or write timeout, because SSE streams stay
 open; the webhook handler bounds its own requests.
 

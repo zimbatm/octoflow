@@ -33,6 +33,7 @@
 | Unit | Runs | Exists when |
 |---|---|---|
 | `octoflow-webhook` | `octoflow webhook` | always |
+| `octoflow-webhook.socket` | holds `webhook.listen` and hands it to the service, so a delivery that arrives during a restart waits and is not refused | always |
 | `octoflow-dispatcher` | `octoflow dispatcher` | always |
 | `octoflow-sse` | `octoflow sse` | always |
 | `octoflow-s3` | `octoflow s3` | `s3.bucket` is set |
