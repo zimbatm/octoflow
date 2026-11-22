@@ -100,7 +100,10 @@ func runWipe(args []string) int {
 	if err := cfg.S3.Validate(); err != nil {
 		fatal("Invalid S3 configuration", err)
 	}
-	store, err := storage.NewObjectStore(&cfg.S3)
+	if err := cfg.S3.ValidateDaily(); err != nil {
+		fatal("Invalid S3 configuration", err)
+	}
+	store, err := storage.NewStreamStore(&cfg.S3)
 	if err != nil {
 		fatal("Failed to open the archive", err)
 	}
@@ -109,6 +112,15 @@ func runWipe(args []string) int {
 		as.Files, as.Rows, as.Matched, as.Rewritten, as.Removed)
 	if err != nil {
 		slog.Error("Archive wipe stopped", "error", err)
+		return 1
+	}
+	// after the batch files: a compaction between the two steps then
+	// reads batch files that no longer hold the events
+	ds, err := wipe.Daily(ctx, store, &cfg.S3, opts, *dryRun)
+	fmt.Printf("wipe daily: files=%d rows=%d matched=%d rewritten=%d removed=%d\n",
+		ds.Files, ds.Rows, ds.Matched, ds.Rewritten, ds.Removed)
+	if err != nil {
+		slog.Error("Daily file wipe stopped", "error", err)
 		return 1
 	}
 	return 0

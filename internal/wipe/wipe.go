@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -214,6 +216,91 @@ func Archive(ctx context.Context, store storage.ObjectStore, cfg *config.S3Confi
 		}
 		st.Rewritten++
 		slog.Info("Rewrote archive file", "key", key, "kept", len(kept), "removed", matched)
+	}
+	return st, nil
+}
+
+type DailyStats struct {
+	// daily files read, rows read, rows selected, files written back
+	// without them, files removed because nothing was left
+	Files, Rows, Matched, Rewritten, Removed int
+}
+
+// Daily removes the selected events from the daily files that compact
+// wrote. A daily file holds the events received on its day, so only the
+// days From to To are read; without From every daily file is. A file is
+// rewritten from its own rows, not from the batch files: it stays whole
+// when batch files are gone. After a rewrite the file is read once more,
+// and a selected event still in it is an error: a compaction that ran at
+// the same time can put the file back from batch files it read before
+// they were wiped. With dryRun it only counts.
+func Daily(ctx context.Context, store storage.StreamStore, cfg *config.S3Config, opts Options, dryRun bool) (DailyStats, error) {
+	var st DailyStats
+	keys, err := store.List(ctx, strings.Trim(cfg.DailyPrefix, "/")+"/")
+	if err != nil {
+		return st, err
+	}
+	slices.Sort(keys)
+
+	for _, key := range keys {
+		day, ok := storage.DailyDay(cfg.DailyPrefix, key)
+		if !ok {
+			continue
+		}
+		if !opts.From.IsZero() && day.Before(opts.From.UTC().Truncate(24*time.Hour)) {
+			continue
+		}
+		if !opts.To.IsZero() && day.After(opts.To.UTC().Truncate(24*time.Hour)) {
+			continue
+		}
+		open := func() (io.ReadSeekCloser, error) { return store.Open(ctx, key) }
+		count := func() (rows, matched int, err error) {
+			err = storage.ReadParquet(open, func(ev *events.GitHubEvent) error {
+				rows++
+				if opts.Matches(ev) {
+					matched++
+				}
+				return ctx.Err()
+			})
+			return rows, matched, err
+		}
+
+		rows, matched, err := count()
+		if err != nil {
+			return st, fmt.Errorf("%s: %w", key, err)
+		}
+		st.Files++
+		st.Rows += rows
+		st.Matched += matched
+		if matched == 0 || dryRun {
+			continue
+		}
+		if matched == rows {
+			if err := store.Delete(ctx, key); err != nil {
+				return st, err
+			}
+			st.Removed++
+			slog.Info("Removed daily file", "key", key, "rows", matched)
+			continue
+		}
+		err = storage.PutParquet(ctx, store, cfg, key, func(out *storage.ParquetWriter) error {
+			return storage.ReadParquet(open, func(ev *events.GitHubEvent) error {
+				if opts.Matches(ev) {
+					return ctx.Err()
+				}
+				return out.Write(ev)
+			})
+		})
+		if err != nil {
+			return st, fmt.Errorf("%s: %w", key, err)
+		}
+		if _, still, err := count(); err != nil {
+			return st, fmt.Errorf("%s: %w", key, err)
+		} else if still > 0 {
+			return st, fmt.Errorf("%s holds %d selected events after its rewrite: something else wrote it, run the wipe again", key, still)
+		}
+		st.Rewritten++
+		slog.Info("Rewrote daily file", "key", key, "kept", rows-matched, "removed", matched)
 	}
 	return st, nil
 }
