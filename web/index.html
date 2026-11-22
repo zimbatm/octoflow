@@ -129,6 +129,29 @@ table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { text-align: left; padding: 7px 12px; border-top: 1px solid var(--line); vertical-align: top; }
 thead th { border-top: 0; color: var(--muted); font-weight: 600; }
 td code { white-space: nowrap; }
+.status .facts { margin: 0 0 14px; }
+.status .facts li { background: var(--bg); }
+.status .facts b span { font-size: inherit; color: inherit; }
+.status .facts li.stale > span { color: var(--bad); }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: 200px; overflow: visible; }
+.chart svg:focus-visible { outline-offset: 4px; }
+.chart .grid-line { stroke: var(--line); stroke-width: 1; }
+.chart .axis { fill: var(--muted); font-size: 11px; }
+.chart .area { fill: var(--accent); fill-opacity: .14; }
+.chart .line { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; }
+.chart .refused { fill: var(--bad); }
+.chart .cross { stroke: var(--muted); stroke-width: 1; }
+.chart .mark { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+.chart .tip { position: absolute; top: 0; pointer-events: none; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; font-size: 13px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
+.chart .tip[hidden] { display: none; }
+.chart .tip span { display: block; color: var(--muted); font-size: 12px; }
+.legend { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+.legend[hidden] { display: none; }
+.legend i { display: inline-block; vertical-align: middle; margin-right: 6px; }
+.legend .k-events { width: 16px; height: 2px; background: var(--accent); }
+.legend .k-refused { width: 3px; height: 9px; background: var(--bad); }
+.legend a { margin-left: auto; }
 footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--muted); font-size: 13px; }
 .sr { position: absolute; left: -9999px; }
 </style>
@@ -140,6 +163,7 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
         <nav aria-label="Sections">
             <a href="#explore">Explore</a>
             <a href="#use">Use a stream</a>
+            <a href="#status">Status</a>
             <a href="#reference">Routes and fields</a>
             <a href="https://github.com/zimbatm/octoflow/blob/main/docs/README.md" rel="noopener">Documentation</a>
         </nav>
@@ -225,6 +249,29 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
     </aside>
 </div>
 
+<section class="wrap ref" id="status">
+    <h2>Status</h2>
+    <p>The events that entered the stream in each minute of the last 24 hours, and the deliveries that the receiver refused.
+       A delivery that did not reach the receiver is not in these numbers.</p>
+    <div class="card status">
+        <div class="body">
+            <ul class="facts">
+                <li id="status-last-box"><b><span class="dot" id="status-dot"></span> <span id="status-last">-</span></b><span id="status-last-label">last event</span></li>
+                <li><b id="status-1h">-</b><span>events in the last hour</span></li>
+                <li><b id="status-24h">-</b><span>events in the last 24 hours</span></li>
+                <li><b id="status-refused">-</b><span>refused deliveries in the last 24 hours</span></li>
+            </ul>
+            <div class="chart" id="status-chart"></div>
+            <div class="empty" id="status-empty"><b>Reading the status</b>The chart appears when the server answers.</div>
+            <p class="legend" id="status-legend" hidden>
+                <span><i class="k-events"></i>events per minute</span>
+                <span><i class="k-refused"></i>minute with a refused delivery</span>
+                <a id="status-raw" rel="noopener">The numbers as JSON</a>
+            </p>
+        </div>
+    </div>
+</section>
+
 <section class="wrap ref" id="reference">
     <h2>Routes and fields</h2>
     <p>All routes answer <code>GET</code> with <code>text/event-stream</code> and permit requests from any origin.
@@ -245,6 +292,7 @@ footer { border-top: 1px solid var(--line); padding: 18px 0 40px; color: var(--m
                     <tr><td><code>?last=N</code></td><td>replay before the live events; default 50, <code>0</code> for none</td></tr>
                     <tr><td><code>?type=a,b</code> <code>?action=x,y</code></td><td>keep only these event types or actions</td></tr>
                     <tr><td><code>/stats</code></td><td>JSON: stored events and open streams</td></tr>
+                    <tr><td><code>/status</code></td><td>JSON: events and refused deliveries for each minute of the last 24 hours</td></tr>
                 </tbody>
             </table>
         </div>
@@ -657,6 +705,159 @@ function fetchStats() {
     }).catch(() => {});
 }
 
+// the server counts per minute; the page only draws. Nothing here is
+// necessary for the rest of the page: an older server has no /status.
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const STALE_MS = 5 * 60 * 1000;
+let statusData = null;
+
+function sv(tag, attrs, ...kids) {
+    const n = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs || {})) n.setAttribute(k, v);
+    n.append(...kids);
+    return n;
+}
+
+const counts = a => (Array.isArray(a) ? a.map(v => (Number.isFinite(v) && v > 0 ? v : 0)) : null);
+
+function fetchStatus() {
+    fetch(SSE_BASE + '/status').then(r => (r.ok ? r.json() : null)).then(s => {
+        const events = s && counts(s.events), start = s && Date.parse(s.start);
+        if (!events || events.length < 2 || !Number.isFinite(start) || !(s.step > 0)) throw new Error('no status');
+        const refused = counts(s.refused) || [];
+        const last = Date.parse(s.last_event), now = Date.parse(s.now);
+        statusData = {
+            start, step: s.step * 1000, events, refused,
+            // the age by the server's clock; the viewer's clock may be wrong
+            lastAge: Number.isFinite(last) ? (Number.isFinite(now) ? now : Date.now()) - last : null,
+            at: Date.now(),
+            events1h: s.events_1h, events24h: s.events_24h, refused24h: s.refused_24h,
+        };
+    }).catch(() => { statusData = null; }).then(renderStatus);
+}
+
+function age(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 60) return s + ' s ago';
+    if (s < 3600) return Math.floor(s / 60) + ' min ago';
+    if (s < 86400) return Math.floor(s / 3600) + ' h ' + Math.floor(s % 3600 / 60) + ' min ago';
+    return Math.floor(s / 86400) + ' d ago';
+}
+
+function renderLastEvent() {
+    const d = statusData;
+    const ms = d && d.lastAge !== null ? d.lastAge + Date.now() - d.at : null;
+    const stale = ms !== null && ms > STALE_MS;
+    $('status-last').textContent = ms === null ? '-' : age(ms);
+    $('status-dot').className = 'dot' + (stale ? ' disconnected' : ' connected');
+    $('status-dot').style.display = ms === null ? 'none' : '';
+    $('status-last-box').className = stale ? 'stale' : '';
+    $('status-last-label').textContent = stale ? 'last event: no event for more than 5 minutes'
+        : d && ms === null ? 'last event: none stored' : 'last event';
+}
+
+function renderStatus() {
+    const d = statusData;
+    const num = v => (Number.isFinite(v) ? v.toLocaleString() : '-');
+    $('status-1h').textContent = d ? num(d.events1h) : '-';
+    $('status-24h').textContent = d ? num(d.events24h) : '-';
+    $('status-refused').textContent = d ? num(d.refused24h) : '-';
+    renderLastEvent();
+    $('status-legend').hidden = !d;
+    $('status-empty').hidden = !!d;
+    if (!d) {
+        $('status-empty').replaceChildren(el('b', null, 'No status from this server'),
+            'It does not publish its numbers, or it does not answer at the moment. The streams do not depend on them.');
+        $('status-chart').replaceChildren();
+        return;
+    }
+    drawChart(d);
+}
+
+function niceMax(v) {
+    if (v <= 4) return 4;
+    const p = 10 ** Math.floor(Math.log10(v));
+    return [1, 2, 4, 6, 8, 10].map(m => m * p).find(m => m >= v);
+}
+
+function drawChart(d) {
+    const box = $('status-chart');
+    // the current minute still grows; a chart that always ends in a drop reads as a fault
+    const n = d.events.length - 1;
+    const W = Math.max(box.clientWidth, 280), H = 200;
+    const m = { l: 46, r: 10, t: 10, b: 28 };
+    const pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const max = niceMax(Math.max(...d.events.slice(0, n)));
+    const x = i => m.l + pw * i / (n - 1);
+    const y = v => m.t + ph * (1 - v / max);
+    const timeOf = i => new Date(d.start + i * d.step);
+
+    const svg = sv('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', tabindex: 0,
+        'aria-label': `Events per minute over the last 24 hours, in your local time. The highest minute had ${Math.max(...d.events.slice(0, n)).toLocaleString()} events. Use the left and right arrow keys to read a minute.` });
+    for (const v of [0, max / 2, max]) {
+        svg.append(sv('line', { class: 'grid-line', x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }),
+            sv('text', { class: 'axis', x: m.l - 8, y: y(v) + 4, 'text-anchor': 'end' }, v.toLocaleString()));
+    }
+    const every = pw < 520 ? 6 : 3;
+    const tick = timeOf(0);
+    tick.setMinutes(0, 0, 0);
+    while (tick < timeOf(0) || tick.getHours() % every) tick.setHours(tick.getHours() + 1);
+    for (; tick <= timeOf(n - 1); tick.setHours(tick.getHours() + every)) {
+        const tx = x((tick - d.start) / d.step);
+        svg.append(sv('line', { class: 'grid-line', x1: tx, x2: tx, y1: m.t + ph, y2: m.t + ph + 4 }),
+            sv('text', { class: 'axis', x: tx, y: H - 6, 'text-anchor': 'middle' },
+                tick.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })));
+    }
+    let path = '';
+    for (let i = 0; i < n; i++) path += (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(d.events[i]).toFixed(1);
+    svg.append(sv('path', { class: 'area', d: `${path}L${x(n - 1).toFixed(1)} ${y(0)}L${x(0)} ${y(0)}Z` }),
+        sv('path', { class: 'line', d: path }));
+    for (let i = 0; i < n; i++) {
+        if (d.refused[i] > 0) svg.append(sv('rect', { class: 'refused', x: x(i) - 1.5, y: m.t + ph - 9, width: 3, height: 9 }));
+    }
+
+    const cross = sv('line', { class: 'cross', y1: m.t, y2: m.t + ph, visibility: 'hidden' });
+    const mark = sv('circle', { class: 'mark', r: 4, visibility: 'hidden' });
+    const tip = el('div', { class: 'tip', hidden: '' });
+    let at = n - 1;
+    const show = i => {
+        at = Math.min(n - 1, Math.max(0, i));
+        cross.setAttribute('x1', x(at));
+        cross.setAttribute('x2', x(at));
+        mark.setAttribute('cx', x(at));
+        mark.setAttribute('cy', y(d.events[at]));
+        cross.setAttribute('visibility', 'visible');
+        mark.setAttribute('visibility', 'visible');
+        const r = d.refused[at] || 0;
+        tip.replaceChildren(el('b', null, d.events[at].toLocaleString() + (d.events[at] === 1 ? ' event' : ' events')),
+            el('span', null, r > 0 && r.toLocaleString() + (r === 1 ? ' refused delivery' : ' refused deliveries')),
+            el('span', null, timeOf(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })));
+        tip.hidden = false;
+        const left = x(at) * box.clientWidth / W;
+        tip.style.left = (left + tip.offsetWidth + 14 > box.clientWidth ? left - tip.offsetWidth - 10 : left + 10) + 'px';
+    };
+    const hide = () => {
+        cross.setAttribute('visibility', 'hidden');
+        mark.setAttribute('visibility', 'hidden');
+        tip.hidden = true;
+    };
+    const hit = sv('rect', { x: m.l, y: m.t, width: pw, height: ph, fill: 'transparent' });
+    hit.addEventListener('pointermove', e => {
+        const r = hit.getBoundingClientRect();
+        show(Math.round((e.clientX - r.left) / r.width * (n - 1)));
+    });
+    hit.addEventListener('pointerleave', hide);
+    svg.addEventListener('keydown', e => {
+        const step = { ArrowLeft: -1, ArrowRight: 1, PageUp: -60, PageDown: 60 }[e.key];
+        if (!step) return;
+        e.preventDefault();
+        show(at + step);
+    });
+    svg.addEventListener('blur', hide);
+    svg.append(cross, mark, hit);
+    box.replaceChildren(svg, tip);
+}
+
 // ---- wiring ------------------------------------------------------------------
 
 $('finder').addEventListener('submit', async e => {
@@ -689,6 +890,13 @@ window.addEventListener('focus', () => { if (es && es.readyState === EventSource
 setInterval(updateRate, 5000);
 // each /stats answer costs the server a consumer; the server caches it for 30 s
 setInterval(fetchStats, 30000);
+setInterval(fetchStatus, 60000);
+setInterval(renderLastEvent, 5000);
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { if (statusData) drawChart(statusData); }, 150);
+});
 
 let start = EVERYTHING;
 try {
@@ -696,6 +904,8 @@ try {
     start = (saved && scopeOf(saved.label, saved.path)) || EVERYTHING;
 } catch (e) { /* no saved stream */ }
 fetchSite();
+$('status-raw').href = SSE_BASE + '/status';
+fetchStatus();
 open(start);
 </script>
 </body>
