@@ -75,6 +75,15 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string
 			return
 		}
 	}
+	slim := false
+	switch p := r.URL.Query().Get("payload"); p {
+	case "":
+	case "none":
+		slim = true
+	default:
+		http.Error(w, fmt.Sprintf("payload: %q is not none, the one value", p), http.StatusBadRequest)
+		return
+	}
 	sw, err := NewWriter(w)
 	if err != nil {
 		http.Error(w, "SSE not supported", http.StatusInternalServerError)
@@ -158,9 +167,16 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string
 				slog.Error("Message without JetStream metadata", "error", err)
 				continue
 			}
+			data := msg.Data
+			if slim {
+				if data, err = json.Marshal(withoutPayload{GitHubEvent: &event}); err != nil {
+					slog.Error("Failed to marshal event", "error", err)
+					continue
+				}
+			}
 			// no event name: a browser's onmessage then sees every type, and
 			// the type is in the data anyway. connected and error stay named.
-			if err := sw.WriteEvent(strconv.FormatUint(meta.Sequence.Stream, 10), "", msg.Data); err != nil {
+			if err := sw.WriteEvent(strconv.FormatUint(meta.Sequence.Stream, 10), "", data); err != nil {
 				return
 			}
 			lastWrite = time.Now()
@@ -174,6 +190,13 @@ func (h *Handler) Stream(w http.ResponseWriter, r *http.Request, streamID string
 			lastWrite = time.Now()
 		}
 	}
+}
+
+// withoutPayload is the event of ?payload=none. Its Payload shadows the one
+// of the event, which has no omitempty and would print "payload":null.
+type withoutPayload struct {
+	*events.GitHubEvent
+	Payload *struct{} `json:"payload,omitempty"`
 }
 
 var consumerSeq atomic.Uint64

@@ -590,3 +590,74 @@ func TestAClientThatLeavesDuringTheReplayLookupIsNotAnError(t *testing.T) {
 		t.Errorf("%d consumers left on the stream, want 0", n)
 	}
 }
+
+// raw connects and returns the data line of the first event.
+func (f *fixture) raw(path string) string {
+	f.t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", f.server.URL+path, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	sc := bufio.NewScanner(resp.Body)
+	inEvent := false
+	for sc.Scan() {
+		if strings.HasPrefix(sc.Text(), "id: ") {
+			inEvent = true
+		}
+		if data, ok := strings.CutPrefix(sc.Text(), "data: "); ok && inEvent {
+			return data
+		}
+	}
+	f.t.Fatalf("%s: no event", path)
+	return ""
+}
+
+func TestPayloadNoneLeavesThePayloadOut(t *testing.T) {
+	f := newFixture(t)
+	ev := &events.GitHubEvent{
+		ID: "d7", Event: "push", Action: "opened", ReceivedAt: time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC),
+		Repository: "o/r", RepositoryID: "7", Organization: "o", OrganizationID: "3", Sender: "s", SenderID: "9",
+		Metadata: map[string]string{"source": "events-api"},
+		Payload:  json.RawMessage(`{"big":"` + strings.Repeat("x", 20000) + `"}`),
+	}
+	if _, err := f.pub.Publish(context.Background(), ev); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := json.Marshal(ev)
+
+	for _, q := range []string{"", "&payload="} {
+		if got := f.raw("/events/org/3?last=1" + q); got != string(stored) {
+			t.Errorf("last=1%s: the event is not the stored message: %d bytes, want %d", q, len(got), len(stored))
+		}
+	}
+
+	got := f.raw("/events/org/3?last=1&payload=none")
+	var fields, want map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(got), &fields); err != nil {
+		t.Fatalf("bad data %q: %v", got, err)
+	}
+	_ = json.Unmarshal(stored, &want)
+	delete(want, "payload")
+	if _, ok := fields["payload"]; ok {
+		t.Errorf("payload=none has a payload field: %s", got)
+	}
+	for k, v := range want {
+		if string(fields[k]) != string(v) {
+			t.Errorf("payload=none: %s = %s, want %s", k, fields[k], v)
+		}
+	}
+	if len(fields) != len(want) || len(want) != 11 {
+		t.Errorf("payload=none has %d fields, the stored event %d without its payload, want 11: %s", len(fields), len(want), got)
+	}
+	if len(got) > 500 {
+		t.Errorf("payload=none is %d bytes", len(got))
+	}
+
+	if _, code := f.read("/events/org/3?payload=small", "", 0); code != http.StatusBadRequest {
+		t.Errorf("payload=small: status %d, want 400", code)
+	}
+}

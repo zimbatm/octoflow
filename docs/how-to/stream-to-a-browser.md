@@ -67,18 +67,35 @@ so no event is lost while the stream still holds it.
 A long range streams a lot of data: an event is 13 to 30 kB. Add
 `?type=` to read only the types that you use.
 
-## 5. Use it from another origin
+## 5. Leave the payload out
+
+An event is 13 to 30 kB, nearly all of it the GitHub payload. A page
+that shows only who did what does not need it:
+
+```javascript
+const source = new EventSource('https://events.example.org/events/repo/4542716?since=2d&payload=none');
+source.onmessage = (e) => {
+  const event = JSON.parse(e.data);
+  console.log(`${event.received_at} ${event.event} ${event.action || ''} by ${event.sender}`);
+};
+```
+
+With `?payload=none` an event has no `payload` field and is a few
+hundred bytes. All other fields stay.
+
+## 6. Use it from another origin
 
 The server answers `Access-Control-Allow-Origin: *`, so a page on any
 origin can connect. Behind nginx, keep buffering off and the read timeout
 long; the NixOS module sets this.
 
-## 6. Try it from the shell
+## 7. Try it from the shell
 
 ```bash
 curl -N 'http://localhost:8080/events?last=3'
 curl -N -H 'Last-Event-ID: 42' 'http://localhost:8080/events/org/222'
 curl -N 'http://localhost:8080/events/repo/111?since=2h&type=pull_request'
+curl -N 'http://localhost:8080/events?last=100&payload=none'
 curl http://localhost:8080/stats
 ```
 

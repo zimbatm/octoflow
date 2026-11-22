@@ -23,6 +23,7 @@ paths:
         - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
@@ -40,6 +41,7 @@ paths:
         - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
@@ -59,6 +61,7 @@ paths:
         - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
@@ -83,6 +86,7 @@ paths:
         - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
@@ -103,6 +107,7 @@ paths:
         - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
@@ -123,6 +128,7 @@ paths:
         - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
@@ -148,6 +154,7 @@ paths:
         - $ref: '#/components/parameters/Since'
         - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
+        - $ref: '#/components/parameters/Payload'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
@@ -260,6 +267,16 @@ components:
       schema:
         type: string
         example: "opened,closed"
+    Payload:
+      name: payload
+      in: query
+      description: |
+        `none` sends each event without its `payload` field. An event is
+        13 to 30 kB, of which the other fields are a few hundred bytes.
+        Without the parameter the stored event is sent unchanged.
+      schema:
+        type: string
+        enum: [none]
     LastEventID:
       name: Last-Event-ID
       in: header
@@ -318,7 +335,7 @@ components:
     GitHubEvent:
       type: object
       description: The stored event, as published by the webhook receiver or public-ingest.
-      required: [id, event, received_at, payload]
+      required: [id, event, received_at]
       properties:
         id:
           type: string
@@ -351,7 +368,7 @@ components:
           type: string
         payload:
           type: object
-          description: The raw GitHub webhook payload
+          description: The raw GitHub webhook payload; absent only with `payload=none`
         metadata:
           type: object
           additionalProperties:

@@ -36,6 +36,7 @@ anything else is a 404.
 | `since=T` | replay from a time, then new ones: an RFC 3339 time (`2026-11-22T08:00:00Z`), or a duration back from now (`90m`, `36h`, `2d`); not capped; ignored when `Last-Event-ID` is sent; a bad value is a 400 |
 | `type=a,b` | read only these GitHub event types; see [Event types](#event-types) |
 | `action=x,y` | keep only these actions; a filter after delivery, so `last=N` also counts the events that it drops |
+| `payload=none` | send each event without its `payload` field; see [Payload](#payload). Any other value is a 400 |
 
 ## Headers
 
@@ -76,7 +77,7 @@ The first of these that the request has decides:
   that was away gets every event that it missed.
 - A long range is a lot of data. An event is 13 to 30 kB, and a busy
   repository stores 1000 events in 9 minutes. Select the types that
-  you use with `type`.
+  you use with `type`, and leave the payload out with `payload=none`.
 - The stream keeps events for `NATS_STREAM_MAX_AGE`, and the fan-out
   copies for `NATS_STREAM_COPY_MAX_AGE` when set. A start before that
   begins at the oldest event.
@@ -109,3 +110,17 @@ filtering:
   there must contain that type and changes nothing; a list without it
   is a 400.
 - The `connected` event shows the subjects that the connection reads.
+
+## Payload
+
+An event is 13 to 30 kB, and the GitHub payload is nearly all of it. The
+other fields are a few hundred bytes. `payload=none` sends each event
+without its `payload` field; every other field of the
+[event](event-format.md) stays:
+
+```json
+{"id":"3fa3a85c-6a48-11f0-8793-19d640392600","event":"pull_request","received_at":"2026-10-14T12:00:00.123456Z","repository":"NixOS/nixpkgs","organization":"NixOS","sender":"zimbatm","action":"opened","organization_id":"487568","repository_id":"4542716","sender_id":"2"}
+```
+
+Use it to count, to list or to route events, and with a long `since`
+range. The default sends the stored message unchanged.
