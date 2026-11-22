@@ -26,6 +26,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
 
   /events/org/{org_id}:
     get:
@@ -40,6 +42,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: The id is not numeric
 
@@ -56,6 +60,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: The id is not numeric
 
@@ -77,6 +83,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: The id is not numeric
 
@@ -94,6 +102,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: An id is not numeric
 
@@ -111,6 +121,8 @@ paths:
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: An id is not numeric
 
@@ -127,11 +139,14 @@ paths:
             pattern: '^[a-z_]+$'
             example: pull_request
         - $ref: '#/components/parameters/Last'
+        - $ref: '#/components/parameters/Type'
         - $ref: '#/components/parameters/Action'
         - $ref: '#/components/parameters/LastEventID'
       responses:
         '200':
           $ref: '#/components/responses/SSEStream'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '404':
           description: The type is not lower-case letters and underscores
 
@@ -204,14 +219,22 @@ components:
     Type:
       name: type
       in: query
-      description: Comma-separated GitHub event types to keep
+      description: |
+        Comma-separated GitHub event types to read, at most 100. Each type
+        takes the place of the last wildcard of the route's subjects, so
+        `last` counts only events of these types. On
+        `/events/type/{event_type}` the list must contain the type of the
+        route and changes nothing.
       schema:
         type: string
+        pattern: '^[a-z_]+(,[a-z_]+)*$'
         example: "push,pull_request"
     Action:
       name: action
       in: query
-      description: Comma-separated actions to keep
+      description: |
+        Comma-separated actions to keep. A filter after delivery: `last`
+        also counts the events that it drops.
       schema:
         type: string
         example: "opened,closed"
@@ -226,6 +249,13 @@ components:
         example: "1842"
 
   responses:
+    BadRequest:
+      description: A query parameter has a bad value; the body says which
+      content:
+        text/plain:
+          schema:
+            type: string
+            example: 'type: "Push" is not an event type; give lower-case letters and underscores, with commas between types'
     SSEStream:
       description: SSE stream established
       headers:

@@ -177,15 +177,86 @@ func TestResumeFromLastEventID(t *testing.T) {
 	}
 }
 
-func TestTypeRouteAndQueryFilter(t *testing.T) {
+func TestTypeRoute(t *testing.T) {
 	f := newFixture(t)
 	got, _ := f.read("/events/type/issues?last=10", "", 1)
 	if want := "d6"; strings.Join(ids(got), " ") != want {
 		t.Errorf("type issues = %v, want %s", ids(got), want)
 	}
-	got, _ = f.read("/events/org/1?last=10&type=issues", "", 1)
+	got, _ = f.read("/events/type/issues?last=10&type=push,issues", "", 1)
 	if want := "d6"; strings.Join(ids(got), " ") != want {
-		t.Errorf("org 1 filtered to issues = %v, want %s", ids(got), want)
+		t.Errorf("type issues, listed in ?type= = %v, want %s", ids(got), want)
+	}
+	if _, code := f.read("/events/type/issues?type=push", "", 0); code != http.StatusBadRequest {
+		t.Errorf("type route with another ?type=: status %d, want 400", code)
+	}
+}
+
+func TestReplayLastNCountsOnlyTheRequestedTypes(t *testing.T) {
+	f := newFixture(t)
+	f.publish("d7", "1", "push")
+	f.publish("d8", "1", "issues")
+	f.publish("d9", "1", "push")
+	f.publish("d10", "1", "push")
+	// the two newest issues have three pushes between and after them
+	for _, path := range []string{"/events/org/1", "/events/repo/7", "/events"} {
+		got, _ := f.read(path+"?last=2&type=issues", "", 2)
+		if want := "d6 d8"; strings.Join(ids(got), " ") != want {
+			t.Errorf("%s last 2 issues = %v, want %s", path, ids(got), want)
+		}
+	}
+	got, _ := f.read("/events/org/1?last=3&type=issues,push,issues", "", 3)
+	if want := "d8 d9 d10"; strings.Join(ids(got), " ") != want {
+		t.Errorf("org 1 last 3 of two types = %v, want %s", ids(got), want)
+	}
+}
+
+func TestActionFiltersAfterTheReplayCount(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	for _, id := range []string{"d7", "d8"} {
+		ev := &events.GitHubEvent{ID: id, Event: "issues", OrganizationID: "1", Action: "closed", Payload: json.RawMessage(`{}`)}
+		if _, err := f.pub.Publish(ctx, ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.publish("d9", "1", "issues")
+	// the last 2 issues are d8 (closed) and d9 (opened): d7 is not replayed
+	got, _ := f.read("/events/org/1?last=2&type=issues&action=closed", "", 1)
+	if want := "d8"; strings.Join(ids(got), " ") != want {
+		t.Errorf("closed among the last 2 issues = %v, want %s", ids(got), want)
+	}
+}
+
+func TestSelectTypes(t *testing.T) {
+	for _, tc := range []struct {
+		subjects []string
+		types    string
+		want     string
+	}{
+		{[]string{"p.org.1.>"}, "", "p.org.1.>"},
+		{[]string{"p.org.*.>", "p.global.>"}, "push", "p.org.*.push p.global.push"},
+		{[]string{"p.user.2.*"}, "push,issues", "p.user.2.push p.user.2.issues"},
+		{[]string{"p.pr.7.3.>"}, "pull_request", "p.pr.7.3.pull_request"},
+		{[]string{"p.org.*.push", "p.global.push"}, "issues,push", "p.org.*.push p.global.push"},
+	} {
+		got, err := selectTypes(tc.subjects, tc.types)
+		if err != nil || strings.Join(got, " ") != tc.want {
+			t.Errorf("selectTypes(%v, %q) = %v, %v; want %s", tc.subjects, tc.types, got, err, tc.want)
+		}
+	}
+}
+
+func TestABadTypeIsRefused(t *testing.T) {
+	f := newFixture(t)
+	var many []string
+	for i := 0; i <= maxTypes; i++ {
+		many = append(many, "t"+strings.Repeat("a", i))
+	}
+	for _, q := range []string{"type=Push", "type=push,", "type=*", "type=push.%3E", "type=a%20b", "type=" + strings.Join(many, ",")} {
+		if _, code := f.read("/events/org/1?"+q, "", 0); code != http.StatusBadRequest {
+			t.Errorf("?%s: status %d, want 400", q, code)
+		}
 	}
 }
 

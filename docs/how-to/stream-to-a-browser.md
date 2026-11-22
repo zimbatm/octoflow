@@ -15,9 +15,15 @@ browser's `EventSource` reads. No client library is needed.
 | `/events/issue/{repo_id}/{number}` | one issue |
 | `/events/type/{event_type}` | one event type across organizations |
 
-Ids must be numeric. Add `?type=push,pull_request` and `?action=opened`
-to filter, and `?last=N` to replay the last N matching events first
+Ids must be numeric. Add `?last=N` to replay the last N events first
 (default 50, maximum 1000, `0` for none).
+
+Add `?type=push,pull_request` to read only some event types. Most
+events of a busy repository are CI events (`workflow_job`, `check_run`,
+`workflow_run`, `check_suite`), so name the types that you use. `last=N`
+then counts only those types: `?type=pull_request&last=20` replays 20
+pull request events. `?action=opened` drops the other actions after
+that count, so it can show fewer than N.
 
 ## 2. Connect
 

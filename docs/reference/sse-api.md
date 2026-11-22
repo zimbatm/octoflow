@@ -11,7 +11,7 @@ All routes answer `GET` with `text/event-stream` and
 
 | Route | Subjects read |
 |---|---|
-| `/events` | `org.>`, `global.>` (every event once) |
+| `/events` | `org.*.>`, `global.>` (every event once) |
 | `/events/org/{org_id}` | `org.{org_id}.>` |
 | `/events/repo/{repo_id}` | `repo.{repo_id}.>` |
 | `/events/user/{user_id}` | `user.{user_id}.*` |
@@ -32,9 +32,9 @@ anything else is a 404.
 
 | Parameter | Meaning |
 |---|---|
-| `last=N` | replay the last N events matching the route before new ones; default 50, maximum 1000, `0` for none; ignored when `Last-Event-ID` is sent |
-| `type=a,b` | keep only these GitHub event types |
-| `action=x,y` | keep only these actions |
+| `last=N` | replay the last N events of the route and of `type`, then new ones; default 50, maximum 1000, `0` for none; ignored when `Last-Event-ID` is sent |
+| `type=a,b` | read only these GitHub event types; see [Event types](#event-types) |
+| `action=x,y` | keep only these actions; a filter after delivery, so `last=N` also counts the events that it drops |
 
 ## Headers
 
@@ -56,8 +56,29 @@ JetStream.
   request gets a 503.
 - Each connection gets its own JetStream consumer, deleted when the
   connection ends and in any case one minute after it goes idle.
-- `last=N` counts only messages that match the route's subjects, found
-  by a binary search over the stream; the stream also holds other
-  subjects between them.
-- Filters apply after replay counting: `last=10&type=push` replays at
-  most 10 events of the route and shows the pushes among them.
+- `last=N` counts only messages that match the subjects of the
+  connection, found by a binary search over the stream; the stream also
+  holds other subjects between them.
+
+## Event types
+
+Every subject ends in the event type. `type=a,b` puts each type in the
+place of the last wildcard of the route's subjects, so NATS does the
+filtering:
+
+| Request | Subjects read |
+|---|---|
+| `/events/repo/4542716` | `repo.4542716.>` |
+| `/events/repo/4542716?type=pull_request,issues` | `repo.4542716.pull_request`, `repo.4542716.issues` |
+| `/events?type=push` | `org.*.push`, `global.push` |
+| `/events/user/2?type=push` | `user.2.push` |
+
+- `last=N` counts only events of these types: `last=10&type=push`
+  replays the last 10 pushes of the route, however many other events
+  are between them.
+- A type must match `[a-z_]+`, and a list has at most 100 types;
+  anything else is a 400 with the reason as text.
+- `/events/type/{event_type}` already reads one type. A `type` list
+  there must contain that type and changes nothing; a list without it
+  is a 400.
+- The `connected` event shows the subjects that the connection reads.
