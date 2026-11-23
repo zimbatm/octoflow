@@ -19,6 +19,9 @@ One binary; the argument names the service.
 | `octoflow reindex [--dry-run]` | reads every primary event of the stream once and fills the KV buckets of the dispatcher again: the name index, the heads of pull requests and the event counts of the last 24 hours; publishes nothing and can run beside the dispatcher; a second run writes nothing new; needs NATS, not S3 |
 | `octoflow version` | prints the build version |
 
+`compact`, `restore` and `wipe` read an S3 object again after a failed
+download: two more times, after 1 and 5 seconds. A 4xx answer is final.
+
 Exit status: 2 for a usage error, 1 when a service or a command fails or cannot
 start, 0 after a clean shutdown on SIGINT or SIGTERM. In `all` mode a
 failing service stops the others.

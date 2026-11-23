@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -49,16 +51,42 @@ func (s *minioStore) List(ctx context.Context, prefix string) ([]string, error) 
 }
 
 func (s *minioStore) Get(ctx context.Context, key string) ([]byte, error) {
-	obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to get %s: %w", key, err)
+	return retryGet(ctx, getBackoff, func() ([]byte, error) {
+		obj, err := s.client.GetObject(ctx, s.bucket, key, minio.GetObjectOptions{})
+		if err != nil {
+			return nil, fmt.Errorf("failed to get %s: %w", key, err)
+		}
+		defer func() { _ = obj.Close() }()
+		data, err := io.ReadAll(obj)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read %s: %w", key, err)
+		}
+		return data, nil
+	})
+}
+
+var getBackoff = []time.Duration{time.Second, 5 * time.Second}
+
+// retryGet calls get again after each pause in backoff. A download of a
+// large object can stop in the middle; a 4xx answer does not change.
+func retryGet(ctx context.Context, backoff []time.Duration, get func() ([]byte, error)) ([]byte, error) {
+	for attempt := 0; ; attempt++ {
+		data, err := get()
+		if err == nil {
+			return data, nil
+		}
+		var resp minio.ErrorResponse
+		permanent := errors.As(err, &resp) && resp.StatusCode >= 400 && resp.StatusCode < 500
+		if attempt >= len(backoff) || ctx.Err() != nil || permanent {
+			return nil, err
+		}
+		slog.Warn("S3 read failed; retrying", "attempt", attempt+1, "error", err)
+		select {
+		case <-ctx.Done():
+			return nil, err
+		case <-time.After(backoff[attempt]):
+		}
 	}
-	defer func() { _ = obj.Close() }()
-	data, err := io.ReadAll(obj)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", key, err)
-	}
-	return data, nil
 }
 
 func (s *minioStore) Put(ctx context.Context, key string, data []byte) error {
